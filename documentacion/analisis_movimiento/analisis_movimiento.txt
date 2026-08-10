@@ -1,0 +1,161 @@
+ANALISIS TECNICO DEL MODULO DE ANALISIS DE MOVIMIENTO
+
+1. Proposito del modulo de analisis de movimiento
+
+El modulo de analisis de movimiento tiene como finalidad interpretar la ejecucion tecnica de los ejercicios de powerlifting a partir de imagenes de video y captura en tiempo real. Su objetivo dentro del sistema es detectar la postura del atleta, extraer puntos anatomicos relevantes, calcular metricas biomecanicas basicas y aplicar reglas que permitan clasificar la ejecucion del levantamiento como valida, nula o pendiente, segun el ejercicio analizado.
+
+En la implementacion real del proyecto, este segmento funciona como una capa de analisis por vision por computadora conectada al backend Flask. No constituye un servicio separado, sino un conjunto de funciones y modulos integrados principalmente en `main.py`, con apoyo de archivos especializados para reglas de banca y peso muerto.
+
+2. Tecnologias y librerias utilizadas
+
+Las tecnologias y librerias utilizadas en este segmento son las siguientes:
+
+- Python, como lenguaje base del modulo.
+- OpenCV (`cv2`), utilizado para captura de camara, lectura de videos, manipulacion de fotogramas, dibujo de overlays y guardado de imagenes.
+- MediaPipe Tasks Vision, concretamente `PoseLandmarker`, utilizado para deteccion de pose humana en imagenes y secuencias de video.
+- NumPy, empleado como apoyo para estructuras de imagen, por ejemplo en la generacion de fotogramas de respaldo.
+- math, usado para el calculo de angulos articulares.
+- threading, utilizado para proteger la inicializacion unica del modelo de pose y el acceso al ultimo resultado compartido.
+- json, empleado para serializar metricas, landmarks y evidencia generada.
+- time, utilizado para marcas temporales en evaluaciones y nombres de archivos.
+
+Ademas, el modulo depende de un modelo de MediaPipe almacenado en `models/pose_landmarker_full.task`, con una ruta alternativa a `pose_landmarker_lite.task` si el principal no estuviera disponible.
+
+3. Archivos principales involucrados
+
+Los archivos identificados como parte del segmento de analisis de movimiento son:
+
+- `main.py`: contiene la inicializacion del detector de pose, el procesamiento de frames, el calculo de angulos basicos, la evaluacion simplificada de ejercicios y el flujo de streaming en tiempo real.
+- `bench_rules.py`: contiene la maquina de estados utilizada para evaluar bench press en tiempo real.
+- `deadlift_rules.py`: contiene la maquina de estados utilizada para evaluar deadlift en tiempo real.
+- `powerlifting_rules/exercise_rules.py`: contiene una logica de evaluacion para squat basada en fases, pero actualmente no esta conectada al flujo principal del backend.
+- `powerlifting_rules/pose_utils.py`: contiene utilidades para pose estimation y dibujo de landmarks; existe como modulo auxiliar no integrado al flujo principal actual.
+- `models/pose_landmarker_full.task`: modelo de inferencia necesario para la deteccion de pose.
+- `frames/`: directorio donde se almacenan evidencias de eventos detectados, como bloqueos, fallos y archivos JSON asociados.
+
+4. Deteccion de pose humana
+
+La deteccion de pose humana se implementa mediante MediaPipe Tasks, utilizando el objeto `PoseLandmarker`. En `main.py`, la funcion `get_pose_landmarker()` inicializa el modelo una sola vez y reutiliza la instancia durante la ejecucion del sistema. Esta inicializacion se protege con un bloqueo (`POSE_LANDMARKER_LOCK`) para evitar condiciones de carrera.
+
+La funcion `detect_pose_from_frame(frame_bgr, timestamp_ms)` convierte cada fotograma desde formato BGR a RGB, construye un objeto `mp.Image` y ejecuta la deteccion con `detect_for_video()`. Este metodo requiere un timestamp monotono en milisegundos, por lo que el sistema genera marcas temporales progresivas para mantener coherencia en secuencias de video o streaming.
+
+Posteriormente, la funcion `get_primary_landmarks()` obtiene la pose principal detectada, en caso de existir. El sistema trabaja con un solo cuerpo por cuadro (`num_poses=1`), por lo que el analisis esta orientado a un unico atleta visible en escena.
+
+Tambien se emplea `serialize_landmarks()` para convertir los puntos detectados a una estructura serializable en JSON, aunque esto se usa principalmente para exponer informacion reciente mediante la API del backend.
+
+5. Calculo de angulos articulares
+
+El calculo angular se realiza a partir de coordenadas bidimensionales normalizadas obtenidas de landmarks corporales. La funcion base `calculate_angle(a, b, c)` calcula el angulo formado por tres puntos usando diferencias de arcotangente y lo normaliza a un rango entre 0 y 180 grados.
+
+En `main.py`, la funcion `build_pose_metrics(landmarks)` calcula tres metricas principales:
+
+- angulo de rodilla (`knee_angle`), usando cadera, rodilla y tobillo izquierdos;
+- angulo de cadera (`hip_angle`), usando hombro, cadera y rodilla izquierdos;
+- angulo de codo (`elbow_angle`), usando hombro, codo y muneca izquierdos.
+
+Antes de usar cada landmark, la funcion `get_landmark_xy()` verifica un nivel minimo de visibilidad. Si un punto no supera el umbral configurado, no se utiliza en el calculo. Esto evita producir metricas con datos demasiado inciertos.
+
+En `deadlift_rules.py` tambien se calcula un angulo adicional de espalda (`back_angle`), derivado geometricamente de la inclinacion entre hombro y cadera. En `bench_rules.py`, ademas del promedio angular de codos, se calculan metricas como altura normalizada de la muneca, longitud del torso y medidas auxiliares para determinar fases del levantamiento.
+
+6. Reglas aplicadas para squat, bench press y deadlift
+
+6.1 Squat
+
+En el flujo principal actual, la sentadilla se evalua mediante una regla simplificada definida en `evaluate_lift_metrics()` dentro de `main.py`. La decision se basa en el menor angulo de rodilla detectado durante el analisis:
+
+- si `knee_min` es menor o igual a 100 grados, el resultado se clasifica como `Bueno`;
+- en caso contrario, se clasifica como `Nulo`.
+
+Esta logica se aplica tanto en el analisis de intentos almacenados como en parte del flujo de evaluacion en tiempo real. No se observa en `main.py` una maquina de estados especializada para squat equivalente a las de bench y deadlift.
+
+Sin embargo, el proyecto contiene `powerlifting_rules/exercise_rules.py`, donde existe una clase `PowerliftingJudge` con una logica mas estructurada para squat. Esa implementacion identifica fases como bajada, punto mas bajo, subida y bloqueo final, y considera fallo por ausencia de bloqueo o por nueva bajada durante el ascenso. Aun asi, dicho modulo no esta integrado al backend principal actual, por lo que debe considerarse funcionalidad auxiliar o en desarrollo.
+
+6.2 Bench press
+
+El bench press se evalua en tiempo real mediante la clase `BenchStateMachine` definida en `bench_rules.py`. Esta maquina de estados modela la secuencia tecnica del levantamiento con las fases:
+
+- `IDLE`
+- `UNRACK`
+- `DESCENT`
+- `CHEST`
+- `ASCENT`
+- `LOCKOUT`
+- `RACK`
+- `END`
+
+Para tomar decisiones, el modulo usa variables como:
+
+- angulo promedio de codos;
+- altura normalizada de la muneca con respecto al torso;
+- longitud de escala del tronco;
+- variacion vertical de la muneca entre cuadros.
+
+Tambien define umbrales ajustables segun la vista (`frontal`, `lateral` o `diagonal`). Durante el ascenso, si detecta una re-bajada significativa, el resultado cambia a `NO_VALIDO` con motivo `re-bajada en ascenso`. Si alcanza lockout y posteriormente rack, el resultado final pasa a `VALIDO`. En el evento intermedio de lockout, el sistema registra un estado `PENDIENTE` hasta confirmar el rack.
+
+6.3 Deadlift
+
+El deadlift se evalua en tiempo real mediante la clase `DeadliftState` en `deadlift_rules.py`. La maquina de estados considera las fases:
+
+- `SETUP`
+- `PULL`
+- `LOCKOUT`
+- `DOWN`
+
+La logica se apoya principalmente en los angulos de rodilla y cadera, y adicionalmente calcula el angulo de espalda. El sistema detecta el inicio del tiron comparando el incremento de rodilla y cadera respecto al cuadro previo. El bloqueo se considera completo cuando ambos angulos alcanzan al menos 165 grados.
+
+Si durante la fase de tiron se produce descenso sostenido de ambos angulos antes del bloqueo completo, el sistema marca el intento como `NO_VALIDO` con la razon `sin bloqueo completo`. Si se detecta el bloqueo, el estado pasa a `VALIDO`.
+
+7. Flujo general del procesamiento
+
+El flujo general del procesamiento puede resumirse de la siguiente manera:
+
+1. Se captura un frame desde camara o se lee un fotograma desde un video almacenado.
+2. El fotograma se convierte a formato compatible con MediaPipe.
+3. Se ejecuta la deteccion de pose para obtener landmarks corporales.
+4. Se selecciona la pose principal detectada.
+5. Se calculan metricas angulares o biomecanicas segun el ejercicio.
+6. Se aplican reglas de evaluacion:
+   - regla angular simplificada para squat;
+   - maquina de estados para bench press;
+   - maquina de estados para deadlift.
+7. Se genera una salida visual con overlays, angulos, fase y estado cuando corresponde.
+8. Si se detecta un evento relevante, se guarda evidencia en disco y se registra informacion en base de datos.
+9. El resultado puede devolverse como frame procesado, respuesta JSON o registro persistente en la base de datos.
+
+En el caso del analisis de intentos en video, `analyze_attempt()` toma muestras del video, procesa cuadros cada cierto intervalo, acumula metricas minimas y luego clasifica el intento. En el caso del tiempo real, `realtime_pose_stream()` realiza captura continua, evaluacion instantanea y emision del stream hacia la interfaz web.
+
+8. Salidas o resultados generados por este segmento
+
+El segmento de analisis de movimiento genera varias salidas segun el contexto de uso:
+
+- clasificacion del levantamiento como `Bueno`, `Nulo`, `VALIDO`, `NO_VALIDO` o `PENDIENTE`, segun la ruta de evaluacion utilizada;
+- metricas angulares del cuerpo, por ejemplo angulos de rodilla, cadera, codo y espalda;
+- landmarks serializados para exposicion por API;
+- fotogramas con superposicion visual de puntos corporales, conexiones oseas, angulos y estado del ejercicio;
+- imagenes de evidencia almacenadas en disco, por ejemplo `frame_lockout_*.jpg` y `frame_fail_*.jpg`;
+- archivos JSON asociados a eventos detectados, con informacion de fecha, atleta, ejercicio, angulos y motivo;
+- registros en la tabla `lift_events` de la base de datos;
+- registros de intentos en la tabla `attempts` cuando se procesa un video mediante `/attempts/auto`.
+
+Adicionalmente, el backend mantiene un estado compartido llamado `LATEST_POSE_RESULT`, utilizado por las rutas `/api/pose/latest` y `/api/pose/evaluate` para exponer el ultimo resultado detectado.
+
+9. Observaciones tecnicas y limitaciones encontradas
+
+Del analisis del codigo real se identifican las siguientes observaciones y limitaciones:
+
+- El modulo de analisis no esta aislado en un paquete independiente; gran parte de su logica se encuentra incrustada en `main.py`.
+- Solo se analiza una pose por cuadro (`num_poses=1`), por lo que el sistema no esta preparado para multiples atletas simultaneos.
+- El calculo angular principal se apoya sobre landmarks del lado izquierdo del cuerpo en el flujo general de `main.py`, lo que puede limitar robustez si ese lado no es visible con claridad.
+- La evaluacion de squat en el backend activo es mas simple que la de bench y deadlift. No posee una maquina de estados integrada en el flujo principal.
+- Existe una implementacion auxiliar para squat en `powerlifting_rules/exercise_rules.py`, pero actualmente no se usa desde `main.py`. Esto sugiere una funcionalidad parcial o pendiente de integracion.
+- Tambien existe un modulo auxiliar `powerlifting_rules/pose_utils.py` con su propia abstraccion de pose estimation, pero no esta conectado al flujo principal del servidor.
+- El analisis de video almacenado en `analyze_attempt()` usa muestreo de cuadros, no procesamiento completo cuadro por cuadro, lo cual reduce costo computacional pero puede omitir detalles intermedios del movimiento.
+- Los umbrales tecnicos son heuristicas definidas manualmente. No se observa un proceso de calibracion automatica ni un modelo entrenado especificamente para clasificar la validez de cada levantamiento.
+- El sistema depende de la correcta disponibilidad del modelo `.task` y de la calidad de la visibilidad de los landmarks detectados.
+- En la interfaz actual, el frontend consume la evaluacion en tiempo real, pero no explota completamente todas las capacidades del backend, por ejemplo el flujo completo de carga de videos ya implementado en `/attempts/auto`.
+
+Conclusion tecnica
+
+El segmento de analisis de movimiento del proyecto combina vision por computadora, geometria articular y reglas heuristicas para evaluar ejecuciones de powerlifting. Su implementacion actual permite detectar pose humana, medir angulos relevantes y aplicar reglas diferenciadas segun el ejercicio, especialmente en bench press y deadlift.
+
+No obstante, el analisis del codigo muestra que el modulo todavia presenta una evolucion parcial: existen componentes auxiliares no integrados, diferencias de complejidad entre ejercicios y una fuerte concentracion de responsabilidades en `main.py`. Aun con estas limitaciones, el sistema ya proporciona una base funcional para la evaluacion tecnica asistida por vision por computadora dentro de la plataforma.

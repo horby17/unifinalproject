@@ -1,0 +1,53 @@
+main.py
+Archivo principal del backend. Define la aplicación Flask, los modelos ORM, la inicialización de la base de datos, la autenticación, las rutas web, los endpoints JSON, el streaming de cámara y el análisis de intentos.
+
+deadlift_rules.py
+Módulo de lógica para peso muerto. Implementa una máquina de estados que determina fases del levantamiento, bloqueo completo y fallos técnicos.
+
+bench_rules.py
+Módulo de lógica para press de banca. Implementa una máquina de estados con fases como unrack, descenso, pausa, ascenso, bloqueo y rack.
+
+powerlifting_rules/exercise_rules.py
+Módulo auxiliar con lógica para evaluar sentadilla. Está presente en el proyecto, pero no se encontró conectado al flujo principal definido en main.py.
+
+powerlifting_rules/pose_utils.py
+Conjunto de utilidades para detección de pose, cálculo de ángulos y dibujo de landmarks. Existe como apoyo técnico, pero no se usa directamente en el backend principal actual.
+
+data/app.db
+Base de datos SQLite del sistema. Contiene las tablas users, athletes, attempts, lift_events y athlete_audit.
+
+diagrama.er
+Diagrama entidad-relación del proyecto. Sirve como apoyo documental para entender las relaciones de datos del backend.
+
+requirements.txt
+Archivo de dependencias del proyecto Python. Incluye Flask, SQLAlchemy, OpenCV, MediaPipe, NumPy y bibliotecas relacionadas.
+
+templates/login.html
+Vista de acceso al sistema. El backend la renderiza desde la ruta /login.
+
+templates/register.html
+Vista para registrar nuevos usuarios. El backend la renderiza desde la ruta /register.
+
+templates/dashboard.html
+Vista del tablero principal con resumen del sistema y lista de intentos recientes.
+
+templates/athlete_create.html
+Formulario web para registrar atletas. Se conecta con la ruta /athletes/new.
+
+templates/camera.html
+Vista principal de captura y evaluación. Consume datos que el backend entrega para el panel de cámara.
+
+templates/settings.html
+Vista de configuración general. Actualmente es informativa y no expone lógica compleja desde el backend.
+
+static/js/app.js
+Archivo JavaScript que interactúa con el backend en la interfaz principal. Consume /pose/stream y /api/pose/evaluate para mostrar video y resultado de evaluación.
+
+uploads/
+Directorio utilizado por el backend para almacenar archivos cargados, especialmente videos e imágenes de intentos.
+
+frames/
+Directorio donde el backend guarda evidencia visual y archivos JSON asociados a eventos detectados en tiempo real.
+
+models/pose_landmarker_full.task
+Modelo de MediaPipe utilizado por el backend para la detección de pose corporal.

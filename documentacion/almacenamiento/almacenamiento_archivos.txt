@@ -1,0 +1,32 @@
+data/app.db
+Base de datos SQLite principal del proyecto. Contiene las tablas users, athletes, attempts, lift_events y athlete_audit.
+
+main.py
+Archivo donde se configura la ruta de la base de datos, el motor SQLite, los modelos ORM y las funciones de persistencia de datos y archivos.
+
+diagrama.er
+Diagrama entidad-relacion del proyecto. Describe las entidades principales y sus relaciones logicas.
+
+uploads/
+Directorio general de almacenamiento de archivos generados o cargados por el sistema.
+
+uploads/attempts/videos/
+Carpeta donde se almacenan los videos enviados para el analisis de intentos.
+
+uploads/attempts/images/
+Carpeta donde se almacenan imagenes generadas durante el procesamiento de intentos.
+
+frames/
+Carpeta donde se guardan evidencias del analisis en tiempo real, como imagenes de fallos, lockout y archivos JSON asociados.
+
+frames/repetitions_log.csv
+Archivo de registro presente en el proyecto y asociado al modulo auxiliar de evaluacion de repeticiones de squat.
+
+bench_rules.py
+Archivo relacionado indirectamente con almacenamiento, ya que sus eventos pueden generar evidencias visuales y registros persistidos en lift_events.
+
+deadlift_rules.py
+Archivo relacionado indirectamente con almacenamiento, ya que sus eventos pueden generar evidencias visuales y registros persistidos en lift_events.
+
+powerlifting_rules/exercise_rules.py
+Modulo auxiliar que incluye logica para registrar repeticiones validas en archivos dentro de la carpeta frames.

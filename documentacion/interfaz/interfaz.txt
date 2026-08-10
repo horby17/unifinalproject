@@ -1,0 +1,149 @@
+DOCUMENTACION TECNICA DEL SEGMENTO DE INTERFAZ DE USUARIO
+
+1. Proposito de la interfaz dentro del sistema
+
+La interfaz de usuario constituye la capa visible del sistema y permite al usuario interactuar con las funcionalidades de autenticacion, consulta, registro de atletas y evaluacion tecnica de levantamientos. Su proposito principal es presentar de manera organizada los controles de operacion del sistema, facilitar el ingreso de datos y mostrar los resultados generados por el backend y el modulo de analisis de movimiento.
+
+Dentro de la arquitectura del proyecto, la interfaz web funciona como el punto de contacto entre el usuario y el sistema de evaluacion. A traves de sus vistas y componentes, el usuario puede iniciar sesion, navegar por el panel, registrar atletas, observar el stream de camara procesado y consultar resultados recientes.
+
+2. Tecnologias utilizadas para la interfaz
+
+Del analisis de la estructura real del proyecto, la interfaz se construye principalmente con las siguientes tecnologias:
+
+- HTML, utilizado en las plantillas de presentacion.
+- Jinja2, empleado para renderizar las vistas desde Flask e insertar datos dinamicos provenientes del backend.
+- CSS, a traves de hojas de estilo ya compiladas y recursos visuales de plantilla.
+- JavaScript, utilizado para la interaccion del lado del cliente en la vista de camara.
+- Alpine.js, incorporado de forma implícita a traves de `static/tailadmin/bundle.js`, para estados sencillos de interfaz como tema oscuro y comportamiento del menu lateral.
+- TailAdmin, como base visual del panel administrativo, usando principalmente `static/tailadmin/style.css` y `static/tailadmin/bundle.js`.
+
+Ademas, existe una hoja de estilo propia en `static/css/styles.css`, asociada a `templates/index.html`. Sin embargo, esta vista no forma parte del flujo principal autenticado actualmente, por lo que puede interpretarse como una interfaz previa, alternativa o de demostracion.
+
+3. Estructura general de navegacion
+
+La navegacion principal del sistema se organiza en dos grupos de vistas:
+
+- vistas de acceso y autenticacion, independientes del panel administrativo;
+- vistas autenticadas que comparten una plantilla base con barra lateral y encabezado superior.
+
+La navegacion autenticada se construye sobre `templates/base.html`, donde se define un layout comun con:
+
+- menu lateral fijo;
+- encabezado superior con titulo de pagina y usuario en sesion;
+- boton para alternar modo oscuro;
+- area principal de contenido.
+
+Dentro del menu lateral se encuentran los accesos visibles a:
+
+- `Inicio` (`/dashboard`)
+- `Panel` (`/`)
+- `Atletas` > `Agregar atleta` (`/athletes/new`)
+- `Configuracion` (`/settings`)
+- `Salir` (`/logout`)
+
+Esta estructura muestra que la navegacion del sistema esta pensada como un panel administrativo de uso continuo, no como una pagina publica tradicional.
+
+4. Pantallas o vistas principales del sistema
+
+Las vistas reales identificadas en el proyecto son las siguientes:
+
+4.1 `login.html`
+
+Corresponde a la pantalla de inicio de sesion. Presenta un formulario con campos de usuario y contrasena, mensajes de error cuando la autenticacion falla y un enlace hacia la vista de registro. Su diseno es independiente del panel principal y utiliza una composicion dividida en dos columnas para escritorio.
+
+4.2 `register.html`
+
+Permite crear nuevas cuentas de usuario. Mantiene la misma estructura visual general del inicio de sesion y contiene un formulario simple con campos de usuario y contrasena, ademas de mensajes de error y un enlace para volver al login.
+
+4.3 `dashboard.html`
+
+Es la vista de inicio del sistema una vez autenticado el usuario. Muestra una descripcion resumida del proyecto, una seccion de acceso rapido al panel de camara y una tabla con los resultados recientes de intentos. Esta vista cumple una funcion informativa y de resumen general.
+
+4.4 `camera.html`
+
+Es la vista principal de operacion. Contiene los controles para seleccionar atleta y tipo de levantamiento, habilitar o deshabilitar la camara, capturar un frame y visualizar el resultado de la evaluacion. Tambien muestra el stream en tiempo real y una seccion para el frame capturado. Esta es la pantalla mas importante desde el punto de vista funcional.
+
+4.5 `athlete_create.html`
+
+Es la vista destinada al registro de atletas. Contiene un formulario amplio con campos personales y deportivos, mensajes de validacion y confirmacion, y controles de tipo texto, numerico, select y area de texto.
+
+4.6 `settings.html`
+
+Es una vista simple de configuracion. Actualmente su contenido es informativo y no presenta controles funcionales complejos dentro de la interfaz.
+
+4.7 `index.html`
+
+Existe una pagina `templates/index.html` que muestra una interfaz distinta, mas cercana a una demostracion inicial con video, canvas y una navegacion simple. No obstante, no forma parte del flujo principal autenticado basado en `base.html`, por lo que debe considerarse una vista residual, preliminar o no integrada al diseno principal actual.
+
+5. Formularios y componentes importantes
+
+La interfaz contiene varios componentes relevantes para la operacion del sistema:
+
+- formulario de inicio de sesion, con campos `username` y `password`;
+- formulario de registro de usuario, tambien con `username` y `password`;
+- formulario de registro de atleta, con campos para identificacion, sexo, nombre, apellido, edad, peso corporal, categoria, nivel, anos de entrenamiento y observaciones;
+- selectores de atleta y tipo de levantamiento en la vista de camara;
+- casilla de verificacion para deshabilitar la camara;
+- boton de captura de frame;
+- panel de estado y resultado de la evaluacion;
+- tabla de resultados recientes en el dashboard;
+- sidebar de navegacion y boton de alternancia de tema visual.
+
+En la vista `camera.html`, los elementos con identificadores `athleteSelect`, `liftType`, `disableCamera`, `recordBtn`, `statusLabel`, `resultLabel`, `poseStream`, `captureFrame` y `capturePlaceholder` son especialmente importantes, ya que son manipulados directamente por `static/js/app.js`.
+
+6. Relacion entre interfaz y backend
+
+La relacion entre interfaz y backend es estrecha y se basa en renderizado del lado del servidor combinado con interacciones asincronas puntuales desde el navegador.
+
+Por una parte, Flask entrega las plantillas HTML mediante `render_template()`, enviando datos como:
+
+- nombre del usuario en sesion;
+- pagina activa para resaltar el menu;
+- listado de atletas;
+- resultados recientes;
+- mensajes de error o confirmacion;
+- titulos de pagina.
+
+Por otra parte, la vista `camera.html` consume servicios del backend a traves de JavaScript:
+
+- el elemento `img` de stream utiliza la ruta `/pose/stream` para mostrar la salida en tiempo real;
+- la funcion `evaluateCurrentPose()` consulta `/api/pose/evaluate` para obtener el resultado actual del analisis;
+- el backend tambien controla el acceso a las vistas mediante sesion, redirigiendo al login cuando no existe autenticacion.
+
+De este modo, la interfaz combina una aproximacion de servidor renderizado con una capa ligera de comportamiento dinamico en el cliente.
+
+7. Flujo de interaccion del usuario
+
+El flujo principal de uso de la interfaz puede describirse del siguiente modo:
+
+1. El usuario accede al sistema y se autentica desde la pantalla de inicio de sesion.
+2. Una vez autenticado, accede al dashboard, donde observa un resumen general y resultados recientes.
+3. Desde el menu lateral o el acceso rapido, se dirige al panel principal de camara.
+4. En la vista de camara, selecciona el atleta y el tipo de levantamiento.
+5. El sistema actualiza el stream en tiempo real segun la seleccion realizada.
+6. El usuario puede deshabilitar la camara si lo requiere.
+7. Al presionar el boton de captura, la interfaz toma el frame mostrado, consulta el resultado actual al backend y presenta el estado correspondiente.
+8. Si necesita registrar un nuevo atleta, navega a la vista de alta y completa el formulario.
+9. El usuario puede consultar posteriormente el dashboard para observar intentos recientes almacenados en el sistema.
+
+Este flujo evidencia que la interfaz esta orientada a sesiones de trabajo operativas, donde el usuario alterna entre consulta, captura y registro de informacion.
+
+8. Observaciones sobre diseno visual y organizacion de la interfaz
+
+Desde el punto de vista visual y organizativo, la interfaz presenta las siguientes caracteristicas:
+
+- El diseno principal sigue el patron de panel administrativo, con sidebar lateral, cabecera superior y tarjetas de contenido.
+- La interfaz usa una plantilla visual consistente en las vistas autenticadas, lo que favorece continuidad grafica y facilidad de navegacion.
+- Se incorpora soporte de modo oscuro mediante una variable de estado gestionada en el cliente y persistida en `localStorage`.
+- La pantalla de camara combina controles y visualizacion en una disposicion de dos columnas, adecuada para tareas de monitoreo y evaluacion.
+- Los formularios presentan validaciones y mensajes visibles dentro de la propia interfaz.
+- La organizacion visual se apoya en componentes tipo tarjeta, tablas, selectores y botones con estilos coherentes.
+- La vista `settings.html` existe pero actualmente es minima, por lo que su desarrollo puede considerarse parcial.
+- La presencia de `templates/index.html` y `static/css/styles.css` sugiere una etapa anterior o una interfaz de prueba que no coincide completamente con el panel principal actual.
+- El proyecto incluye multiples archivos HTML dentro de `static/tailadmin/`, pero estos corresponden a recursos de plantilla y no a vistas funcionales propias del sistema enlazadas desde Flask.
+
+Conclusion tecnica
+
+La interfaz de usuario del proyecto esta construida principalmente mediante plantillas HTML renderizadas por Flask, apoyadas en recursos visuales de TailAdmin y un comportamiento JavaScript ligero para la vista operativa de camara. Su estructura actual responde al modelo de panel administrativo, con una navegacion clara, vistas diferenciadas por contexto y una integracion directa con el backend.
+
+El analisis del proyecto muestra una interfaz funcional y organizada para el flujo principal del sistema, aunque todavia existen elementos parciales o residuales, como la vista `index.html` y la seccion de configuracion. Aun asi, la implementacion actual proporciona una base adecuada para la operacion del sistema y su documentacion tecnica.

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6">
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
+    <div class="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-2">
+      <h3 class="mb-3 text-theme-xl font-semibold text-gray-800 dark:text-white/90">
+        Sobre el sistema
+      </h3>
+      <p class="text-sm text-gray-500 dark:text-gray-400 sm:text-base">
+        Plataforma web para evaluar la tecnica en competencias de powerlifting del
+        gimnasio Evolution Machine usando vision por computadora.
+      </p>
+      <p class="mt-3 text-sm text-gray-500 dark:text-gray-400 sm:text-base">
+        El objetivo es apoyar decisiones tecnicas con analisis de posturas y
+        trayectoria en tiempo real.
+      </p>
+    </div>
+    <div class="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03]">
+      <h3 class="mb-3 text-theme-xl font-semibold text-gray-800 dark:text-white/90">
+        Acciones rapidas
+      </h3>
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        Inicia el panel de camara para realizar una prueba.
+      </p>
+      <a
+        href="/"
+        class="mt-4 inline-flex items-center justify-center rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600"
+      >
+        Ir al panel
+      </a>
+    </div>
+  </div>
+  <div class="mt-6 rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03]">
+    <h3 class="mb-4 text-theme-xl font-semibold text-gray-800 dark:text-white/90">
+      Resultados recientes
+    </h3>
+    {% if attempts %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-gray-600 dark:text-gray-300">
+          <thead class="border-b border-gray-200 text-xs uppercase tracking-wide text-gray-400 dark:border-gray-800">
+            <tr>
+              <th class="px-3 py-2">Atleta</th>
+              <th class="px-3 py-2">Tipo</th>
+              <th class="px-3 py-2">Resultado</th>
+              <th class="px-3 py-2">Motivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for attempt, athlete in attempts %}
+              <tr class="border-b border-gray-100 dark:border-gray-800">
+                <td class="px-3 py-2">{{ athlete.first_name }} {{ athlete.last_name }}</td>
+                <td class="px-3 py-2">{{ attempt.lift_type }}</td>
+                <td class="px-3 py-2">{{ attempt.ai_result }}</td>
+                <td class="px-3 py-2">{{ attempt.fail_reason or '-' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-sm text-gray-500 dark:text-gray-400">No hay intentos registrados aun.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

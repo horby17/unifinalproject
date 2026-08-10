@@ -1,0 +1,41 @@
+templates/base.html
+Plantilla base de las vistas autenticadas. Define la estructura general del panel, el menu lateral, el encabezado superior, el modo oscuro y el contenedor principal de contenido.
+
+templates/login.html
+Vista de inicio de sesion. Presenta el formulario de autenticacion y mensajes de error.
+
+templates/register.html
+Vista de registro de usuarios. Permite crear nuevas cuentas para acceder al sistema.
+
+templates/dashboard.html
+Vista principal de inicio dentro del panel. Muestra informacion general del sistema, acceso rapido al panel y resultados recientes.
+
+templates/camera.html
+Vista operativa principal de la interfaz. Contiene el stream de camara, controles de seleccion, boton de captura y area de resultado.
+
+templates/athlete_create.html
+Formulario de registro de atletas. Permite ingresar informacion personal y deportiva requerida por el sistema.
+
+templates/settings.html
+Vista de configuracion. Actualmente presenta contenido informativo y una implementacion simple.
+
+templates/index.html
+Vista alternativa o residual con una interfaz distinta basada en video y canvas. No forma parte del flujo principal autenticado actual.
+
+static/js/app.js
+Archivo JavaScript principal de la interfaz operativa. Controla la vista de camara, el estado de captura, la consulta de evaluacion y la actualizacion del stream.
+
+static/tailadmin/style.css
+Hoja de estilos principal usada por las vistas activas del panel administrativo y de autenticacion.
+
+static/tailadmin/bundle.js
+Archivo JavaScript compilado de la plantilla visual, utilizado para interacciones de interfaz como estados Alpine.js y comportamiento general del panel.
+
+static/tailadmin/favicon.ico
+Icono utilizado por la interfaz web.
+
+static/css/styles.css
+Hoja de estilos propia asociada a `templates/index.html`. Parece corresponder a una interfaz anterior o de demostracion.
+
+static/tailadmin/
+Directorio que contiene recursos de la plantilla visual utilizada por el sistema, incluidos estilos, scripts y paginas de referencia del template.

@@ -1,0 +1,66 @@
+[users]
+    *id {label:"INTEGER"}
+    username {label:"VARCHAR(100)"}
+    password_hash {label:"TEXT"}
+    created_at {label:"TEXT"}
+
+[athletes]
+    *id {label:"INTEGER"}
+    first_name {label:"VARCHAR(100)"}
+    last_name {label:"VARCHAR(100)"}
+    age {label:"INTEGER"}
+    body_weight {label:"FLOAT"}
+    category {label:"VARCHAR(100)"}
+    document_id {label:"VARCHAR(50)"}
+    level {label:"VARCHAR(20)"}
+    notes {label:"TEXT"}
+    sex {label:"VARCHAR(20)"}
+    years_training {label:"INTEGER"}
+    created_by {label:"INTEGER"}
+    updated_by {label:"INTEGER"}
+    deleted_by {label:"INTEGER"}
+    created_at {label:"TEXT"}
+    updated_at {label:"TEXT"}
+    deleted_at {label:"TEXT"}
+
+[attempts]
+    *id {label:"INTEGER"}
+    athlete_id {label:"INTEGER"}
+    lift_type {label:"TEXT"}
+    weight {label:"REAL"}
+    ai_result {label:"TEXT"}
+    body_angles {label:"TEXT"}
+    fail_reason {label:"TEXT"}
+    image_path {label:"TEXT"}
+    video_path {label:"TEXT"}
+    created_at {label:"TEXT"}
+
+[lift_events]
+    *id {label:"INTEGER"}
+    athlete_id {label:"INTEGER"}
+    attempt_id {label:"INTEGER"}
+    lift_type {label:"TEXT"}
+    event_type {label:"TEXT"}
+    result {label:"TEXT"}
+    reason {label:"TEXT"}
+    image_path {label:"TEXT"}
+    metrics_json {label:"TEXT"}
+    created_at {label:"TEXT"}
+
+[athlete_audit]
+    *id {label:"INTEGER"}
+    athlete_id {label:"INTEGER"}
+    user_id {label:"INTEGER"}
+    action {label:"TEXT"}
+    old_values {label:"TEXT"}
+    new_values {label:"TEXT"}
+    created_at {label:"TEXT"}
+
+attempts.athlete_id > athletes.id
+lift_events.athlete_id > athletes.id
+lift_events.attempt_id > attempts.id
+athletes.created_by > users.id
+athletes.updated_by > users.id
+athletes.deleted_by > users.id
+athlete_audit.athlete_id > athletes.id
+athlete_audit.user_id > users.id

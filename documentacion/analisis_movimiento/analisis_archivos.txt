@@ -1,0 +1,29 @@
+main.py
+Contiene el flujo principal de analisis de movimiento: inicializacion del detector de pose, procesamiento de frames, calculo de metricas, evaluacion simplificada de ejercicios, analisis de videos y streaming en tiempo real.
+
+bench_rules.py
+Implementa la maquina de estados para bench press. Define fases del movimiento, umbrales de evaluacion y criterios para determinar eventos como lockout, rack y fallo tecnico.
+
+deadlift_rules.py
+Implementa la maquina de estados para deadlift. Evalua setup, tiron, bloqueo y descenso mediante angulos de rodilla y cadera, ademas de registrar fallos por ausencia de bloqueo completo.
+
+powerlifting_rules/exercise_rules.py
+Modulo auxiliar con logica para squat basada en fases del movimiento. Existe en el proyecto, pero no esta integrado al flujo principal del backend actual.
+
+powerlifting_rules/pose_utils.py
+Modulo auxiliar con una abstraccion de estimacion de pose y utilidades para dibujo de landmarks y calculo angular. Actualmente no se usa desde `main.py`.
+
+models/pose_landmarker_full.task
+Modelo de MediaPipe utilizado para la deteccion de pose humana.
+
+frames/
+Carpeta donde se almacenan imagenes y archivos JSON de evidencia generados por el analisis de movimiento en tiempo real.
+
+data/app.db
+Base de datos donde el sistema registra eventos tecnicos (`lift_events`) e intentos procesados (`attempts`) relacionados con el analisis de movimiento.
+
+static/js/app.js
+Archivo del frontend que consume el stream procesado y la evaluacion de pose expuesta por el backend, conectando la salida del analisis con la interfaz web.
+
+templates/camera.html
+Interfaz principal donde se visualiza el stream con overlay, se selecciona el atleta y el ejercicio, y se muestra el resultado de la evaluacion.

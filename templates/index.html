@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Evolution Machine | Powerlifting Vision</title>
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="brand">Evolution Machine</div>
+        <h1>Evaluacion tecnica con vision por computadora</h1>
+        <p>
+          Sistema web para evaluar ejecucion en competencias de powerlifting.
+        </p>
+        <div class="actions">
+          <button id="startBtn" class="btn-primary">Abrir camara</button>
+          <span class="label">Resultado: <strong id="label">-</strong></span>
+        </div>
+        <nav class="menu">
+          <a href="/">Inicio</a>
+          <a href="/dashboard">Panel</a>
+          <a href="/logout">Salir</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="panel">
+        <h2>Vista en vivo</h2>
+        <div class="video-grid">
+          <video id="video" autoplay playsinline></video>
+          <canvas id="canvas" width="320" height="240"></canvas>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Detalles</h2>
+        <p>
+          Esta demo detecta rostro y muestra el label <em>face</em> cuando hay
+          deteccion. Luego podemos ampliar a tecnicas de powerlifting.
+        </p>
+      </section>
+    </main>
+
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>

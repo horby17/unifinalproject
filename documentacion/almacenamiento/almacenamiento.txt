@@ -1,0 +1,185 @@
+DOCUMENTACION TECNICA DEL SEGMENTO DE ALMACENAMIENTO Y BASE DE DATOS
+
+1. Proposito de la base de datos dentro del sistema
+
+La base de datos y los mecanismos de almacenamiento del proyecto tienen como finalidad conservar la informacion operativa y tecnica generada durante el uso del sistema. Este segmento permite persistir usuarios, atletas, intentos de levantamiento, eventos detectados por el analisis de movimiento y referencias a archivos multimedia asociados al proceso de evaluacion.
+
+Dentro de la arquitectura general del sistema, la persistencia de datos cumple dos funciones principales. En primer lugar, conserva la informacion estructurada necesaria para la operacion de la aplicacion, como credenciales, registros de atletas e historial de intentos. En segundo lugar, mantiene la trazabilidad tecnica del analisis realizado, ya que almacena rutas de videos, imagenes de evidencia y metricas serializadas obtenidas durante la evaluacion automatizada.
+
+2. Tecnologia o motor de almacenamiento utilizado
+
+El proyecto utiliza como motor principal de persistencia una base de datos SQLite localizada en la ruta `data/app.db`.
+
+La integracion con este motor se realiza mediante dos mecanismos complementarios:
+
+- SQLAlchemy, utilizado para mapear y manipular principalmente las entidades `Athlete` y `Attempt`.
+- `sqlite3`, utilizado para operaciones directas sobre tablas como `users` y `lift_events`, asi como para tareas de inicializacion y ajuste del esquema.
+
+Adicionalmente, el sistema emplea almacenamiento en sistema de archivos para evidencias y archivos multimedia. En particular, se identifican estas rutas relevantes:
+
+- `uploads/attempts/videos/` para videos cargados al sistema;
+- `uploads/attempts/images/` para imagenes generadas durante el procesamiento de intentos;
+- `frames/` para imagenes y archivos JSON de evidencia generados por el analisis en tiempo real.
+
+Por tanto, el segmento de almacenamiento no se limita a la base relacional, sino que combina persistencia estructurada en SQLite con almacenamiento de archivos en disco.
+
+3. Entidades o tablas principales
+
+Del analisis del esquema real en `data/app.db`, se identificaron las siguientes tablas:
+
+3.1 Tabla `users`
+
+Esta tabla almacena la informacion basica de autenticacion de los usuarios del sistema. Su estructura observada es:
+
+- `id`: clave primaria autoincremental.
+- `username`: nombre de usuario, definido como unico y obligatorio.
+- `password_hash`: hash de contrasena.
+- `created_at`: campo de fecha/hora presente en la base real.
+
+3.2 Tabla `athletes`
+
+Esta tabla almacena los datos de los atletas registrados. Su estructura incluye:
+
+- `id`: clave primaria.
+- `document_id`: identificador documental del atleta.
+- `first_name`: nombre.
+- `last_name`: apellido.
+- `age`: edad.
+- `sex`: sexo.
+- `body_weight`: peso corporal.
+- `category`: categoria competitiva o de clasificacion.
+- `level`: nivel del atleta.
+- `years_training`: anos de entrenamiento.
+- `notes`: observaciones.
+- `created_by`, `updated_by`, `deleted_by`: campos de referencia a usuario.
+- `created_at`, `updated_at`, `deleted_at`: campos temporales de trazabilidad.
+
+3.3 Tabla `attempts`
+
+Esta tabla registra los intentos procesados por el sistema. Su estructura real contiene:
+
+- `id`: clave primaria autoincremental.
+- `athlete_id`: identificador del atleta asociado.
+- `lift_type`: tipo de levantamiento.
+- `weight`: peso del intento, permitido como nulo.
+- `video_path`: ruta del video almacenado.
+- `image_path`: ruta de la imagen asociada al intento.
+- `ai_result`: resultado de la evaluacion automatizada.
+- `fail_reason`: motivo del fallo, si existe.
+- `body_angles`: metricas angulares serializadas.
+- `created_at`: campo temporal presente en la base real.
+
+3.4 Tabla `lift_events`
+
+Esta tabla almacena eventos tecnicos detectados durante el analisis en tiempo real. Contiene:
+
+- `id`: clave primaria autoincremental.
+- `athlete_id`: atleta relacionado.
+- `attempt_id`: intento relacionado, si aplica.
+- `lift_type`: tipo de levantamiento.
+- `event_type`: tipo de evento detectado.
+- `result`: resultado del evento.
+- `reason`: razon tecnica asociada.
+- `image_path`: ruta de la evidencia visual.
+- `metrics_json`: metricas asociadas al evento.
+- `created_at`: fecha y hora de registro.
+
+3.5 Tabla `athlete_audit`
+
+Esta tabla corresponde a un componente de auditoria para cambios sobre atletas. Su estructura incluye:
+
+- `id`: clave primaria autoincremental.
+- `athlete_id`: atleta afectado.
+- `user_id`: usuario que realiza la accion.
+- `action`: accion ejecutada.
+- `old_values`: valores previos serializados.
+- `new_values`: valores nuevos serializados.
+- `created_at`: fecha y hora del evento de auditoria.
+
+4. Relaciones entre entidades
+
+A partir del diagrama `diagrama.er` y del esquema real, se identifican las siguientes relaciones logicas:
+
+- `attempts.athlete_id` se relaciona con `athletes.id`.
+- `lift_events.athlete_id` se relaciona con `athletes.id`.
+- `lift_events.attempt_id` se relaciona con `attempts.id`.
+- `athletes.created_by`, `athletes.updated_by` y `athletes.deleted_by` se relacionan conceptualmente con `users.id`.
+- `athlete_audit.athlete_id` se relaciona con `athletes.id`.
+- `athlete_audit.user_id` se relaciona con `users.id`.
+
+Es importante señalar que, en la base SQLite observada, estas relaciones se expresan a nivel de diseno logico y de indices, pero no se encontraron restricciones `FOREIGN KEY` declaradas explicitamente en el esquema mostrado por `sqlite3 .schema`.
+
+5. Manejo de usuarios, atletas, intentos y evidencias
+
+5.1 Usuarios
+
+Los usuarios se almacenan en la tabla `users`. La inicializacion del sistema, realizada en `init_db()`, crea esta tabla si no existe y, ademas, inserta un usuario administrador por defecto cuando la tabla se encuentra vacia. Las contrasenas no se almacenan en texto plano, sino como hash generado con Werkzeug.
+
+5.2 Atletas
+
+Los atletas se almacenan en la tabla `athletes`. Desde el backend, su insercion se realiza mediante el modelo ORM `Athlete`, definido en `main.py`. La vista de registro de atletas valida los datos antes de persistirlos. La informacion del atleta luego se reutiliza en otros flujos, por ejemplo en la seleccion de sujeto para el analisis de intentos.
+
+5.3 Intentos
+
+Los intentos se almacenan en la tabla `attempts` mediante el modelo ORM `Attempt`. Cada intento registra el atleta, el tipo de levantamiento, las rutas del video y de la imagen asociada, el resultado del analisis, el posible motivo de nulidad y las metricas angulares en formato serializado.
+
+El backend incluye una funcion llamada `ensure_attempts_schema()` destinada a corregir o migrar la estructura de la tabla `attempts` cuando detecta una configuracion previa incompatible, especialmente en relacion con el campo `weight`.
+
+5.4 Evidencias
+
+Las evidencias del sistema se manejan de forma mixta:
+
+- en la base de datos se guardan rutas y metadatos;
+- en disco se almacenan los archivos binarios o de evidencia tecnica.
+
+El sistema utiliza funciones como `save_upload()`, `save_video_blob()` y `save_frame_image()` para conservar archivos cargados o generados durante el procesamiento.
+
+En el caso de evidencias de tiempo real, las funciones `save_deadlift_evidence()` y `save_bench_evidence()` generan imagenes en la carpeta `frames/` y crean un archivo JSON asociado con informacion como fecha, identificador del atleta, ejercicio, angulos y motivo del resultado.
+
+6. Componentes de auditoria, si existen
+
+Si, el proyecto contiene un componente de auditoria representado por la tabla `athlete_audit`, y este componente tambien aparece en el diagrama entidad-relacion del proyecto.
+
+No obstante, del analisis del archivo `main.py` no se encontraron operaciones activas que inserten o consulten registros en esta tabla. Por ello, puede afirmarse que el componente de auditoria existe en la estructura de datos, pero no se encuentra integrado funcionalmente al flujo principal actual del backend.
+
+Ademas de esta auditoria estructurada, puede considerarse que `lift_events` tambien cumple una funcion de trazabilidad tecnica, ya que conserva eventos relevantes del analisis de movimiento con su respectiva evidencia visual y metrica.
+
+7. Archivos y rutas relevantes para almacenamiento
+
+Los archivos y rutas mas relevantes dentro de este segmento son los siguientes:
+
+- `data/app.db`: base de datos SQLite principal del proyecto.
+- `main.py`: define la configuracion de la ruta de base de datos, los modelos ORM y las funciones de persistencia.
+- `diagrama.er`: documento de apoyo que describe el modelo relacional esperado.
+- `uploads/attempts/videos/`: almacenamiento de videos cargados por el usuario para analisis de intentos.
+- `uploads/attempts/images/`: almacenamiento de imagenes asociadas a intentos procesados.
+- `frames/`: almacenamiento de evidencias del analisis en tiempo real, incluyendo imagenes y archivos JSON.
+- `frames/repetitions_log.csv`: archivo adicional presente en el proyecto, asociado al modulo auxiliar de squat en `powerlifting_rules/exercise_rules.py`.
+
+Tambien resultan relevantes estas constantes de configuracion detectadas en `main.py`:
+
+- `DB_PATH`
+- `UPLOAD_DIR`
+- `ATTEMPT_UPLOAD_DIR`
+
+Estas rutas permiten unificar la localizacion de la base y de los archivos generados por el sistema.
+
+8. Observaciones sobre la estructura de datos
+
+Del analisis del proyecto real se desprenden las siguientes observaciones tecnicas:
+
+- La persistencia combina SQLAlchemy y `sqlite3` directo. Esta mezcla es funcional, pero incrementa el acoplamiento y exige cuidado para mantener coherencia entre modelos, sentencias SQL y esquema real.
+- Existen diferencias entre los modelos ORM y la base real. Por ejemplo, los modelos `Athlete` y `Attempt` definidos en `main.py` no incluyen todos los campos temporales presentes en SQLite, como `created_at`.
+- La tabla `athlete_audit` existe en la base y en el diagrama, pero no se encontro integrada al flujo principal del backend.
+- La tabla `lift_events` si se encuentra activamente utilizada, especialmente para registrar eventos de bench y deadlift detectados en tiempo real.
+- Los intentos no almacenan directamente el archivo multimedia dentro de la base, sino solo la ruta al recurso almacenado en disco. Esta estrategia reduce el tamano de la base de datos y simplifica la gestion de archivos pesados.
+- Se detectaron indices para `attempts`, `lift_events` y `athlete_audit`, lo cual mejora la consulta por claves de relacion, aunque no sustituye la ausencia de restricciones foraneas explicitas.
+- El sistema conserva tanto datos transaccionales como evidencias tecnicas. Esto resulta adecuado para trazabilidad y validacion posterior del analisis.
+- La carpeta `frames/` contiene archivos JPG y JSON ya generados, lo que confirma que la persistencia de evidencias forma parte del funcionamiento real del proyecto.
+- La carpeta `uploads/attempts/` contiene videos WebM e imagenes de respaldo, lo que confirma que el sistema ya opera con persistencia de archivos de entrada y salida.
+
+Conclusion tecnica
+
+El segmento de almacenamiento del proyecto se apoya en una arquitectura de persistencia mixta, compuesta por una base de datos SQLite para informacion estructurada y un sistema de archivos local para evidencias multimedia. Esta organizacion permite conservar tanto la operacion administrativa del sistema como la trazabilidad tecnica del proceso de evaluacion automatizada.
+
+La estructura de datos observada resulta coherente con el objetivo del proyecto, aunque todavia presenta algunos aspectos parciales o mejorables, como la falta de integracion activa de la auditoria de atletas, la coexistencia de acceso ORM y SQL manual, y la diferencia entre ciertos modelos declarados y el esquema real persistido. A pesar de ello, la implementacion actual proporciona una base solida para registrar usuarios, atletas, intentos, eventos y evidencias del sistema.
