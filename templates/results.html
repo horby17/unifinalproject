@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link href="/static/css/results.css" rel="stylesheet" />
+{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6">
+  <section class="results-section rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div class="results-heading">
+      <div>
+        <h3 class="text-theme-xl font-semibold text-gray-800 dark:text-white/90">Registro de resultados por competidor</h3>
+        <p class="results-description text-sm text-gray-500 dark:text-gray-400">Consulta los intentos guardados de cada competidor y tipo de levantamiento.</p>
+      </div>
+      <a href="/" class="text-sm font-medium text-brand-500">Registrar un intento</a>
+    </div>
+    <form method="get" action="/results" class="results-filters">
+      <div>
+        <label for="resultsAthlete" class="text-sm font-medium text-gray-700 dark:text-gray-400">Competidor</label>
+        <select id="resultsAthlete" name="athlete_id" class="border border-gray-300 bg-white text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+          <option value="">Todos los competidores</option>
+          {% for athlete in athletes %}
+          <option value="{{ athlete.id }}" {% if athlete_id == athlete.id %}selected{% endif %}>{{ athlete.first_name }} {{ athlete.last_name }} · {{ athlete.document_id }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="resultsLift" class="text-sm font-medium text-gray-700 dark:text-gray-400">Tipo de levantamiento</label>
+        <select id="resultsLift" name="lift_type" class="border border-gray-300 bg-white text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+          <option value="">Todos los levantamientos</option>
+          {% for value, label in [('Squat', 'Sentadilla (Squat)'), ('Bench', 'Press de banca (Bench)'), ('Deadlift', 'Peso muerto (Deadlift)')] %}
+          <option value="{{ value }}" {% if lift_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="resultsOutcome" class="text-sm font-medium text-gray-700 dark:text-gray-400">Resultado</label>
+        <select id="resultsOutcome" name="result" class="border border-gray-300 bg-white text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+          <option value="">Todos los resultados</option>
+          {% for value in ['Bueno', 'Nulo', 'Sin evaluar'] %}
+          <option value="{{ value }}" {% if selected_result == value %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="results-filter-actions">
+        <button type="submit" class="rounded-lg bg-brand-500 px-5 text-sm font-medium text-white hover:bg-brand-600">Aplicar filtros</button>
+        <a href="/results" class="text-sm font-medium text-brand-500">Limpiar</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="results-section rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div class="results-heading">
+      <h3 class="text-theme-xl font-semibold text-gray-800 dark:text-white/90">Resumen por competidor y levantamiento</h3>
+      <span class="text-sm text-gray-500 dark:text-gray-400">{{ total }} intento{{ '' if total == 1 else 's' }} con los filtros actuales</span>
+    </div>
+    {% if summary %}
+    <div class="overflow-x-auto">
+      <table class="results-table text-gray-600 dark:text-gray-300">
+        <caption class="sr-only">Cantidad de resultados por competidor y levantamiento con los filtros actuales</caption>
+        <thead class="border-b border-gray-200 text-gray-500 dark:border-gray-800 dark:text-gray-400">
+          <tr><th scope="col">Competidor</th><th scope="col">Levantamiento</th><th scope="col">Intentos</th><th scope="col">Buenos</th><th scope="col">Nulos</th><th scope="col">Sin evaluar</th></tr>
+        </thead>
+        <tbody>
+          {% for row in summary %}
+          <tr class="border-b border-gray-100 dark:border-gray-800">
+            <td class="results-competitor"><strong>{{ row.first_name }} {{ row.last_name }}</strong><small class="text-gray-500 dark:text-gray-400">{{ row.document_id }}</small></td>
+            <td>{{ row.lift_type }}</td><td>{{ row.total }}</td><td>{{ row.good }}</td><td>{{ row.null }}</td><td>{{ row.unevaluated }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="results-empty text-sm text-gray-500 dark:text-gray-400">No hay resultados para los filtros seleccionados.</p>
+    {% endif %}
+  </section>
+
+  <section class="results-section rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div class="results-heading">
+      <div>
+        <h3 class="text-theme-xl font-semibold text-gray-800 dark:text-white/90">Detalle de los intentos</h3>
+        <p class="results-description text-sm text-gray-500 dark:text-gray-400">Los intentos más recientes aparecen primero. Las grabaciones normales figuran como Sin evaluar.</p>
+      </div>
+    </div>
+    {% if attempts %}
+    <div class="overflow-x-auto">
+      <table class="results-table text-gray-600 dark:text-gray-300">
+        <caption class="sr-only">Registro individual de intentos por competidor</caption>
+        <thead class="border-b border-gray-200 text-gray-500 dark:border-gray-800 dark:text-gray-400">
+          <tr><th scope="col">Intento</th><th scope="col">Competidor</th><th scope="col">Levantamiento</th><th scope="col">Resultado</th><th scope="col">Motivo</th><th scope="col">Evidencia</th></tr>
+        </thead>
+        <tbody>
+          {% for attempt, athlete in attempts %}
+          <tr class="border-b border-gray-100 dark:border-gray-800">
+            <td>#{{ attempt.id }}</td>
+            <td class="results-competitor"><strong>{{ athlete.first_name }} {{ athlete.last_name }}</strong><small class="text-gray-500 dark:text-gray-400">{{ athlete.document_id }}</small></td>
+            <td>{{ attempt.lift_type }}</td>
+            <td><span class="results-badge {% if attempt.ai_result == 'Bueno' %}bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-200{% elif attempt.ai_result == 'Nulo' %}bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300{% else %}bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-400{% endif %}">{{ attempt.ai_result }}</span></td>
+            <td class="results-reason">{{ attempt.fail_reason | public_reason or '—' }}</td>
+            <td>
+              <div class="results-evidence">
+                {% if attempt.image_path %}<a href="{{ attempt.image_path }}" target="_blank" rel="noopener" class="text-brand-500" aria-label="Ver captura del intento {{ attempt.id }}">Captura</a>{% endif %}
+                {% if attempt.video_path %}<a href="{{ attempt.video_path }}" target="_blank" rel="noopener" class="text-brand-500" aria-label="Ver video del intento {{ attempt.id }}">Video</a>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <nav class="results-pagination text-sm text-gray-500 dark:text-gray-400" aria-label="Páginas del registro">
+      <span>Página {{ page }} de {{ pages }} · {{ total }} intentos</span>
+      <div class="results-page-links">
+        {% if page > 1 %}<a class="text-brand-500" href="{{ url_for('results', athlete_id=athlete_id or '', lift_type=lift_type, result=selected_result, page=page-1) }}">Anterior</a>{% endif %}
+        {% if page < pages %}<a class="text-brand-500" href="{{ url_for('results', athlete_id=athlete_id or '', lift_type=lift_type, result=selected_result, page=page+1) }}">Siguiente</a>{% endif %}
+      </div>
+    </nav>
+    {% else %}
+    <p class="results-empty text-sm text-gray-500 dark:text-gray-400">No hay intentos guardados para esta selección. Puedes registrar uno desde el panel.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

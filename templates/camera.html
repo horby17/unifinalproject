@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block extra_css %}
+<link href="/static/css/camera.css" rel="stylesheet" />
+{% endblock %}
+
 {% block content %}
 <div class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6">
   {% if status %}
@@ -9,16 +13,16 @@
   {% endif %}
 
   <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
-    <div class="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03]">
+    <div class="capture-panel rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03]">
       <h3 class="mb-3 text-theme-xl font-semibold text-gray-800 dark:text-white/90">
-        Captura automatica
+        Evaluación del levantamiento
       </h3>
       <p class="text-sm text-gray-500 dark:text-gray-400">
-        Selecciona el atleta y el tipo de levantamiento. Puedes deshabilitar la camara cuando lo necesites.
+        Selecciona el atleta, el levantamiento y cómo deseas registrar el intento.
       </p>
-      <div class="mt-5 space-y-4">
-        <div>
-          <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+      <div class="capture-controls">
+        <div class="capture-control">
+          <label for="athleteSelect" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
             Atleta
           </label>
           <div x-data="{ isOptionSelected: false }" class="relative z-20 bg-transparent">
@@ -35,9 +39,9 @@
             </select>
           </div>
         </div>
-        <div>
-          <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-            Tipo
+        <div class="capture-control">
+          <label for="liftType" class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+            Tipo de levantamiento
           </label>
           <div x-data="{ isOptionSelected: false }" class="relative z-20 bg-transparent">
             <select
@@ -53,40 +57,84 @@
             </select>
           </div>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="capture-control capture-camera rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
           <input id="disableCamera" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           <label for="disableCamera" class="text-sm text-gray-700 dark:text-gray-300">
-            Deshabilitar camara
+            Deshabilitar cámara
           </label>
         </div>
-        <div class="flex flex-wrap items-center gap-4">
+        <fieldset id="recordingMode" class="capture-mode">
+          <legend class="text-sm font-medium text-gray-700 dark:text-gray-400">Modo de registro</legend>
+          <div class="capture-mode-options">
+            <label class="capture-mode-option rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
+              <input type="radio" name="recordingMode" value="automatic" checked>
+              <span><strong class="text-sm text-gray-800 dark:text-white/90">Opción automática</strong><small class="text-gray-500 dark:text-gray-400">Detecta el movimiento y guarda video, resultado y captura del intento.</small></span>
+            </label>
+            <label class="capture-mode-option rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900">
+              <input type="radio" name="recordingMode" value="normal">
+              <span><strong class="text-sm text-gray-800 dark:text-white/90">Grabación normal</strong><small class="text-gray-500 dark:text-gray-400">Inicia y detén el video manualmente, sin evaluación automática.</small></span>
+            </label>
+          </div>
+          <p id="recordingHelp" class="text-sm text-gray-500 dark:text-gray-400">Activa el modo automático y colócate en la postura inicial. Cada activación registra un intento.</p>
+        </fieldset>
+        <div class="capture-control capture-action">
           <button
             id="recordBtn"
-            class="inline-flex items-center justify-center rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600"
+            class="inline-flex w-full items-center justify-center rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600"
             type="button"
           >
-            Capturar frame
+            Activar automático
           </button>
-          <span class="text-sm text-gray-600 dark:text-gray-300">
-            Estado: <strong id="statusLabel">Listo</strong>
-          </span>
         </div>
-        <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
-          Resultado IA: <strong id="resultLabel">-</strong>
+        <div class="capture-control capture-summary rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300" role="status">
+          <span>Estado</span>
+          <strong id="statusLabel">Listo</strong>
+        </div>
+        <div class="capture-control capture-summary rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300" role="status">
+          <span>Resultado IA</span>
+          <strong id="resultLabel">-</strong>
         </div>
       </div>
+      <p id="recordingFeedback" class="recording-feedback text-sm text-gray-600 dark:text-gray-300" role="status" hidden></p>
+      <a id="recordingVideo" class="recording-video text-sm font-medium text-brand-500" hidden target="_blank" rel="noopener">Ver video guardado</a>
     </div>
     <div class="space-y-6">
       <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
         <h4 class="mb-3 text-sm font-semibold text-gray-800 dark:text-white/90">Camara en tiempo real con puntos</h4>
-        <img id="poseStream" src="/pose/stream" alt="Stream de pose" class="w-full rounded-lg border border-gray-200 dark:border-gray-800">
+        <div id="cameraPlaceholder" class="camera-empty rounded-lg border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400" role="status">
+          <strong id="cameraPlaceholderTitle">Preparando cámara</strong>
+          <span id="cameraPlaceholderDetail">La vista en tiempo real aparecerá aquí.</span>
+        </div>
+        <img id="poseStream" hidden alt="Stream de pose" class="w-full rounded-lg border border-gray-200 dark:border-gray-800">
+        <section class="pose-analysis" aria-labelledby="poseAnalysisTitle">
+          <div class="pose-analysis-heading">
+            <h4 id="poseAnalysisTitle" class="text-sm font-semibold text-gray-800 dark:text-white/90">Análisis en tiempo real</h4>
+            <span id="poseDetection" class="text-sm text-gray-500 dark:text-gray-400" role="status">Esperando cámara</span>
+          </div>
+          <dl class="pose-metrics">
+            {% for key, label in [('knee_angle', 'Rodilla'), ('hip_angle', 'Cadera'), ('elbow_angle', 'Codo'), ('back_angle', 'Espalda'), ('elbow_angle_l', 'Codo izquierdo'), ('elbow_angle_r', 'Codo derecho')] %}
+            <div class="pose-metric rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900" {% if loop.index > 4 %}hidden{% endif %}>
+              <dt class="text-sm text-gray-500 dark:text-gray-400">{{ label }}</dt>
+              <dd data-pose-angle="{{ key }}" class="text-gray-800 dark:text-white/90">—</dd>
+            </div>
+            {% endfor %}
+          </dl>
+          <dl class="pose-details text-sm text-gray-600 dark:text-gray-300">
+            <div><dt>Fase</dt><dd id="posePhase">—</dd></div>
+            <div><dt>Estado del levantamiento</dt><dd id="poseLiftStatus">—</dd></div>
+            <div><dt>Resultado en vivo</dt><dd id="poseLiveResult">—</dd></div>
+          </dl>
+          <p id="poseReason" class="text-sm text-gray-500 dark:text-gray-400" hidden></p>
+        </section>
       </div>
       <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-        <h4 class="mb-3 text-sm font-semibold text-gray-800 dark:text-white/90">Frame capturado (evaluacion)</h4>
-        <div id="capturePlaceholder" class="flex h-56 items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-          Sin captura aun
+        <h4 class="mb-3 text-sm font-semibold text-gray-800 dark:text-white/90">Captura del intento automático</h4>
+        <div id="capturePlaceholder" class="camera-empty rounded-lg border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400" role="status">
+          <strong>Esperando un intento automático</strong>
+          <span>Al finalizar el levantamiento, aquí aparecerá la captura con su resultado.</span>
         </div>
-        <img id="captureFrame" src="" alt="Frame capturado" class="hidden w-full rounded-lg border border-gray-200 dark:border-gray-800">
+        <img id="captureFrame" hidden alt="Frame capturado" class="w-full rounded-lg border border-gray-200 dark:border-gray-800">
+        <p id="automaticCaptureResult" class="recording-feedback text-sm text-gray-600 dark:text-gray-300" role="status" hidden></p>
       </div>
     </div>
   </div>

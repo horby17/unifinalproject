@@ -7,8 +7,8 @@ import time
 import uuid
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify, redirect, render_template, request, session
-from sqlalchemy import Column, Float, Integer, String, Text, create_engine
+from flask import Flask, Response, jsonify, redirect, render_template, request, session, send_from_directory
+from sqlalchemy import Column, Float, Integer, String, Text, create_engine, case, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -18,6 +18,7 @@ from mediapipe.tasks.python import vision
 
 from deadlift_rules import DeadliftState, evaluate_deadlift
 from bench_rules import BenchStateMachine
+from recording_engine import LiftRecording
 
 print("OpenCV:", cv2.__version__)
 print("Flask OK")
@@ -45,8 +46,18 @@ LATEST_POSE_RESULT = {
     "has_pose": False,
     "body_angles": {"knee_angle": None, "hip_angle": None, "elbow_angle": None},
     "landmarks": [],
+    "updated_at": None,
+    "lift_type": "",
+    "athlete_id": None,
+    "phase": None,
+    "status": None,
+    "reason": None,
+    "result": None,
+    "error": None,
 }
 LATEST_POSE_RESULT_LOCK = threading.Lock()
+RECORDINGS = {}
+RECORDINGS_LOCK = threading.Lock()
 
 LEFT_SHOULDER = 11
 LEFT_ELBOW = 13
@@ -155,6 +166,17 @@ def require_login():
     return session.get("user") is None
 
 
+@app.template_filter("public_reason")
+def public_reason(reason):
+    if not reason:
+        return None
+    if any(marker in reason.lower() for marker in (
+        "poselandmarker", "pose_landmarker", "modelo de pose", "model_asset_path", "mediapipe",
+    )):
+        return "Análisis automático no disponible en este momento."
+    return reason
+
+
 def ensure_attempts_schema():
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute(
@@ -215,8 +237,9 @@ def save_frame_image(frame, prefix="frame"):
     os.makedirs(os.path.join(ATTEMPT_UPLOAD_DIR, "images"), exist_ok=True)
     filename = f"{prefix}-{uuid.uuid4().hex}.jpg"
     rel_path = os.path.join("uploads", "attempts", "images", filename)
-    abs_path = os.path.join(os.path.dirname(__file__), rel_path)
-    cv2.imwrite(abs_path, frame)
+    abs_path = os.path.join(ATTEMPT_UPLOAD_DIR, "images", filename)
+    if not cv2.imwrite(abs_path, frame):
+        raise RuntimeError("No se pudo guardar la imagen del intento.")
     return f"/{rel_path}"
 
 
@@ -238,10 +261,8 @@ def get_pose_landmarker():
         if POSE_LANDMARKER_ERROR is not None:
             raise RuntimeError(POSE_LANDMARKER_ERROR)
         if not os.path.exists(POSE_LANDMARKER_MODEL_PATH):
-            POSE_LANDMARKER_ERROR = (
-                "Modelo PoseLandmarker no encontrado. "
-                f"Define POSE_LANDMARKER_MODEL_PATH o agrega el archivo en {POSE_LANDMARKER_MODEL_PATH}"
-            )
+            app.logger.error("No se encontró el modelo de pose en %s", POSE_LANDMARKER_MODEL_PATH)
+            POSE_LANDMARKER_ERROR = "Análisis automático no disponible en este momento."
             raise RuntimeError(POSE_LANDMARKER_ERROR)
         # Inicializacion unica del modelo Tasks (modo VIDEO para timestamps por frame).
         options = vision.PoseLandmarkerOptions(
@@ -336,7 +357,7 @@ def serialize_landmarks(landmarks):
     ]
 
 
-def draw_pose_overlay(frame_bgr, landmarks, metrics, result_label=None, overlay_info=None):
+def draw_pose_overlay(frame_bgr, landmarks, metrics, result_label=None, overlay_info=None, show_text=True):
     h, w = frame_bgr.shape[:2]
     for start, end in POSE_CONNECTIONS:
         p1 = landmarks[start]
@@ -347,6 +368,9 @@ def draw_pose_overlay(frame_bgr, landmarks, metrics, result_label=None, overlay_
     for point in landmarks:
         x, y = int(point.x * w), int(point.y * h)
         cv2.circle(frame_bgr, (x, y), 3, (0, 90, 255), -1)
+
+    if not show_text:
+        return frame_bgr
 
     knee_angle = metrics.get("knee_angle")
     hip_angle = metrics.get("hip_angle")
@@ -703,6 +727,48 @@ def dashboard():
     )
 
 
+@app.route("/results")
+def results():
+    if require_login():
+        return redirect("/login")
+    athlete_id = request.args.get("athlete_id", type=int)
+    lift_type = request.args.get("lift_type", "")
+    result = request.args.get("result", "")
+    if lift_type not in {"Squat", "Bench", "Deadlift"}:
+        lift_type = ""
+    if result not in {"Bueno", "Nulo", "Sin evaluar"}:
+        result = ""
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = 20
+    with SessionLocal() as db:
+        athletes = db.query(Athlete).order_by(Athlete.last_name, Athlete.first_name).all()
+        query = db.query(Attempt, Athlete).join(Athlete, Athlete.id == Attempt.athlete_id)
+        if athlete_id is not None:
+            query = query.filter(Attempt.athlete_id == athlete_id)
+        if lift_type:
+            query = query.filter(Attempt.lift_type == lift_type)
+        if result:
+            query = query.filter(Attempt.ai_result == result)
+        total = query.count()
+        pages = max(1, (total + per_page - 1) // per_page)
+        page = min(page, pages)
+        attempts = query.order_by(Attempt.id.desc()).offset((page - 1) * per_page).limit(per_page).all()
+        summary = query.with_entities(
+            Athlete.id, Athlete.first_name, Athlete.last_name, Athlete.document_id,
+            Attempt.lift_type,
+            func.count(Attempt.id).label("total"),
+            func.sum(case((Attempt.ai_result == "Bueno", 1), else_=0)).label("good"),
+            func.sum(case((Attempt.ai_result == "Nulo", 1), else_=0)).label("null"),
+            func.sum(case((Attempt.ai_result == "Sin evaluar", 1), else_=0)).label("unevaluated"),
+        ).group_by(Athlete.id, Athlete.first_name, Athlete.last_name, Athlete.document_id, Attempt.lift_type
+                   ).order_by(Athlete.last_name, Athlete.first_name, Athlete.id, Attempt.lift_type).all()
+    return render_template(
+        "results.html", username=session.get("user"), active_page="results", page_title="Resultados",
+        athletes=athletes, attempts=attempts, summary=summary, total=total, page=page, pages=pages,
+        athlete_id=athlete_id, lift_type=lift_type, selected_result=result,
+    )
+
+
 @app.route("/settings")
 def settings():
     if require_login():
@@ -853,6 +919,7 @@ def attempt_auto():
         return jsonify(error="No se pudo guardar el video."), 400
 
     analysis = analyze_attempt(video_path, lift_type)
+    analysis["fail_reason"] = public_reason(analysis["fail_reason"])
     image_path = analysis["image_path"]
     if not image_path:
         image_path = save_frame_image(np.zeros((480, 640, 3), dtype=np.uint8), "fallback")
@@ -881,34 +948,17 @@ def attempt_auto():
     )
 
 
-def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, view=None):
+def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, view=None, recording=None):
     try:
         cap = open_camera(camera_index)
     except RuntimeError as exc:
-        error_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(
-            error_frame,
-            "No se pudo abrir la camara",
-            (30, 220),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255, 255, 255),
-            2,
-        )
-        cv2.putText(
-            error_frame,
-            str(exc)[:70],
-            (30, 260),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            (255, 255, 255),
-            1,
-        )
-        ok, jpg = cv2.imencode(".jpg", error_frame)
-        if ok:
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n"
+        if recording:
+            recording.finish(reason="No se pudo abrir la cámara")
+        with LATEST_POSE_RESULT_LOCK:
+            LATEST_POSE_RESULT.update(
+                updated_at=time.time(), lift_type=lift_type or "", athlete_id=athlete_id,
+                has_pose=False, body_angles={}, landmarks=[], phase=None, status=None,
+                reason=None, result=None, error="Cámara no disponible",
             )
         return
 
@@ -929,6 +979,8 @@ def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, vie
             landmark_data = []
             result_label = None
             overlay_info = None
+            pose_error = None
+            reason = None
             try:
                 pose_result = detect_pose_from_frame(frame, timestamp_ms)
                 landmarks = get_primary_landmarks(pose_result)
@@ -937,38 +989,20 @@ def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, vie
                     if lift_type == "Deadlift":
                         deadlift_result = evaluate_deadlift(landmarks, timestamp_ms, deadlift_state)
                         metrics = deadlift_result.metrics
+                        reason = deadlift_result.reason
                         overlay_info = {
                             "exercise": "Deadlift",
                             "phase": deadlift_result.phase.value,
                             "status": deadlift_result.status,
                         }
-                        if deadlift_result.event in {"lockout", "fail"}:
-                            payload = {
-                                "fecha_hora": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "athlete_id": athlete_id,
-                                "ejercicio": "deadlift",
-                                "angulos": metrics,
-                                "motivo": deadlift_result.reason,
-                            }
-                            image_path, _ = save_deadlift_evidence(frame, deadlift_result.event, payload)
-                            result_label_db = (
-                                "VALIDO" if deadlift_result.event == "lockout" else "NO_VALIDO"
-                            )
-                            save_lift_event_db(
-                                athlete_id,
-                                "Deadlift",
-                                deadlift_result.event,
-                                image_path,
-                                result_label_db,
-                                deadlift_result.reason,
-                                metrics,
-                            )
                         result_label = (
-                            "Bueno" if deadlift_result.status == "VALIDO" else "Nulo"
+                            "Bueno" if deadlift_result.status == "VALIDO"
+                            else "Nulo" if deadlift_result.status == "NO_VALIDO" else None
                         )
                     elif lift_type == "Bench":
                         bench_result = bench_state.update(landmarks, timestamp_ms)
                         metrics = bench_result.metrics
+                        reason = bench_result.reason
                         overlay_info = {
                             "exercise": "Bench",
                             "phase": bench_result.phase.value,
@@ -991,31 +1025,9 @@ def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, vie
                                 else "",
                             ],
                         }
-                        if bench_result.event in {"lockout", "rack", "fail"}:
-                            payload = {
-                                "fecha_hora": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "athlete_id": athlete_id,
-                                "ejercicio": "bench",
-                                "angulos": metrics,
-                                "motivo": bench_result.reason,
-                            }
-                            image_path, _ = save_bench_evidence(frame, bench_result.event, payload)
-                            result_label_db = (
-                                "VALIDO" if bench_result.event == "rack" else "NO_VALIDO"
-                            )
-                            if bench_result.event == "lockout":
-                                result_label_db = "PENDIENTE"
-                            save_lift_event_db(
-                                athlete_id,
-                                "Bench",
-                                bench_result.event,
-                                image_path,
-                                result_label_db,
-                                bench_result.reason,
-                                metrics,
-                            )
                         result_label = (
-                            "Bueno" if bench_result.status == "VALIDO" else "Nulo"
+                            "Bueno" if bench_result.status == "VALIDO"
+                            else "Nulo" if bench_result.status == "NO_VALIDO" else None
                         )
                     else:
                         metrics = build_pose_metrics(landmarks)
@@ -1024,19 +1036,21 @@ def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, vie
                         if lift_type in {"Squat", "Bench", "Deadlift"}:
                             result_label = evaluate_lift_metrics(lift_type, metrics_min)
                     frame = draw_pose_overlay(
-                        frame, landmarks, metrics, result_label=result_label, overlay_info=overlay_info
+                        frame, landmarks, metrics, result_label=result_label, overlay_info=overlay_info,
+                        show_text=False,
                     )
             except RuntimeError as exc:
                 print(f"PoseLandmarker error en realtime_pose_stream: {exc}")
-                cv2.putText(
-                    frame,
-                    "Modelo de pose no disponible",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 0, 255),
-                    1,
+                pose_error = "Análisis automático no disponible en este momento."
+
+            if recording:
+                recording.process(
+                    frame, has_pose, metrics,
+                    phase=(overlay_info or {}).get("phase"),
+                    status=(overlay_info or {}).get("status"), reason=reason,
                 )
+                saved_result = recording.snapshot().get("result")
+                result_label = saved_result["ai_result"] if saved_result and recording.mode == "automatic" else None
 
             with LATEST_POSE_RESULT_LOCK:
                 # Estado compartido para consultas JSON en /api/pose/latest.
@@ -1044,6 +1058,12 @@ def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, vie
                 LATEST_POSE_RESULT["has_pose"] = has_pose
                 LATEST_POSE_RESULT["body_angles"] = metrics
                 LATEST_POSE_RESULT["landmarks"] = landmark_data
+                LATEST_POSE_RESULT.update(
+                    updated_at=time.time(), lift_type=lift_type or "", athlete_id=athlete_id,
+                    phase=(overlay_info or {}).get("phase"),
+                    status=(overlay_info or {}).get("status"), reason=reason,
+                    result=result_label, error=pose_error,
+                )
 
             ret, jpg = cv2.imencode(".jpg", frame)
             if not ret:
@@ -1054,6 +1074,8 @@ def realtime_pose_stream(camera_index=None, lift_type=None, athlete_id=None, vie
             )
     finally:
         cap.release()
+        if recording:
+            recording.finish(reason="La cámara se detuvo antes de completar la grabación")
 
 
 @app.route("/pose/stream")
@@ -1064,12 +1086,22 @@ def pose_stream():
     lift_type = request.args.get("lift_type", default="", type=str)
     athlete_id = request.args.get("athlete_id", default=None, type=str)
     view = request.args.get("view", default="frontal", type=str)
+    recording_id = request.args.get("recording_id", "")
+    recording = None
+    if recording_id:
+        with RECORDINGS_LOCK:
+            recording = RECORDINGS.get(recording_id)
+        if not recording or recording.owner != session.get("user"):
+            return jsonify(error="Grabación no encontrada"), 404
+        athlete_id = str(recording.athlete_id)
+        lift_type = recording.lift_type
     return Response(
         realtime_pose_stream(
             camera_index=camera_index,
             lift_type=lift_type,
             athlete_id=athlete_id,
             view=view,
+            recording=recording,
         ),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
@@ -1094,6 +1126,84 @@ def video_feed():
     )
 
 
+def persist_recording(recording, frame, result, reason, metrics):
+    reason = public_reason(reason)
+    image_path = save_frame_image(frame, "automatic" if recording.mode == "automatic" else "recording")
+    video_path = f"/uploads/attempts/videos/{recording.video_filename}"
+    with SessionLocal() as db:
+        attempt = Attempt(
+            athlete_id=recording.athlete_id, lift_type=recording.lift_type,
+            weight=None, video_path=video_path, image_path=image_path,
+            ai_result=result, fail_reason=reason, body_angles=json.dumps(metrics),
+        )
+        db.add(attempt)
+        db.commit()
+        attempt_id = attempt.id
+    return {
+        "attempt_id": attempt_id, "ai_result": result, "fail_reason": reason,
+        "body_angles": metrics, "image_path": image_path, "video_path": video_path,
+    }
+
+
+@app.route("/api/recordings", methods=["POST"])
+def create_recording():
+    if require_login():
+        return jsonify(error="unauthorized"), 401
+    data = request.get_json(silent=True) or {}
+    if data.get("mode") not in {"automatic", "normal"}:
+        return jsonify(error="Selecciona un modo válido."), 400
+    if data.get("lift_type") not in {"Squat", "Bench", "Deadlift"}:
+        return jsonify(error="Selecciona un tipo de levantamiento."), 400
+    try:
+        athlete_id = int(data.get("athlete_id", ""))
+    except (ValueError, TypeError):
+        return jsonify(error="Selecciona un atleta."), 400
+    with SessionLocal() as db:
+        if not db.get(Athlete, athlete_id):
+            return jsonify(error="El atleta no existe."), 400
+    with RECORDINGS_LOCK:
+        # Keep recent completed results without allowing an unbounded registry.
+        expired = [key for key, value in RECORDINGS.items()
+                   if value.state in {"done", "cancelled", "error"}
+                   and time.monotonic() - value.created_at > 3600]
+        for key in expired:
+            del RECORDINGS[key]
+        if any(value.owner == session.get("user") and value.state in {"waiting", "starting", "recording"}
+               for value in RECORDINGS.values()):
+            return jsonify(error="Detén la grabación actual antes de iniciar otra."), 409
+        recording = LiftRecording(
+            session.get("user"), athlete_id, data["lift_type"], data["mode"],
+            os.path.join(ATTEMPT_UPLOAD_DIR, "videos"), persist_recording,
+        )
+        RECORDINGS[recording.id] = recording
+    return jsonify(recording.snapshot()), 201
+
+
+@app.route("/api/recordings/<recording_id>", methods=["GET", "POST"])
+def recording_status(recording_id):
+    if require_login():
+        return jsonify(error="unauthorized"), 401
+    with RECORDINGS_LOCK:
+        recording = RECORDINGS.get(recording_id)
+    if not recording or recording.owner != session.get("user"):
+        return jsonify(error="Grabación no encontrada."), 404
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        if data.get("action") != "stop":
+            return jsonify(error="Acción no válida."), 400
+        recording.finish(reason="Grabación detenida por el usuario")
+    return jsonify(recording.snapshot())
+
+
+@app.route("/uploads/attempts/<kind>/<filename>")
+def recording_file(kind, filename):
+    if require_login():
+        return redirect("/login")
+    if kind not in {"images", "videos"}:
+        return jsonify(error="Archivo no encontrado"), 404
+    return send_from_directory(os.path.join(ATTEMPT_UPLOAD_DIR, kind), filename)
+
+
 @app.route("/api/pose/latest")
 def api_pose_latest():
     if require_login():
@@ -1104,6 +1214,9 @@ def api_pose_latest():
             "has_pose": LATEST_POSE_RESULT["has_pose"],
             "body_angles": dict(LATEST_POSE_RESULT["body_angles"]),
             "landmarks": list(LATEST_POSE_RESULT["landmarks"]),
+            **{key: LATEST_POSE_RESULT[key] for key in (
+                "updated_at", "lift_type", "athlete_id", "phase", "status", "reason", "result", "error"
+            )},
         }
     return jsonify(payload)
 

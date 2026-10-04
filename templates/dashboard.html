@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 
+{% block extra_css %}
+<link href="/static/css/results.css" rel="stylesheet" />
+{% endblock %}
+
 {% block content %}
 <div class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6">
   <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -32,9 +36,10 @@
     </div>
   </div>
   <div class="mt-6 rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03]">
-    <h3 class="mb-4 text-theme-xl font-semibold text-gray-800 dark:text-white/90">
-      Resultados recientes
-    </h3>
+    <div class="results-heading">
+      <h3 class="text-theme-xl font-semibold text-gray-800 dark:text-white/90">Resultados recientes</h3>
+      <a href="/results" class="text-sm font-medium text-brand-500">Ver registro por competidor</a>
+    </div>
     {% if attempts %}
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm text-gray-600 dark:text-gray-300">
@@ -52,7 +57,7 @@
                 <td class="px-3 py-2">{{ athlete.first_name }} {{ athlete.last_name }}</td>
                 <td class="px-3 py-2">{{ attempt.lift_type }}</td>
                 <td class="px-3 py-2">{{ attempt.ai_result }}</td>
-                <td class="px-3 py-2">{{ attempt.fail_reason or '-' }}</td>
+                <td class="px-3 py-2">{{ attempt.fail_reason | public_reason or '—' }}</td>
               </tr>
             {% endfor %}
           </tbody>
