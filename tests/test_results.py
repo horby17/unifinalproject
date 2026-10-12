@@ -48,6 +48,44 @@ class ResultsTests(unittest.TestCase):
         self.assertEqual(summary[(1, "Bench")], (1, 0, 0, 1))
         self.assertEqual(summary[(2, "Deadlift")], (1, 0, 1, 0))
 
+    def test_dashboard_statistics_use_all_results_and_exclude_unevaluated_from_rate(self):
+        with self.captured() as contexts:
+            response = self.client.get("/dashboard")
+        self.assertEqual(response.status_code, 200)
+        stats = contexts[-1]["statistics"]
+        self.assertEqual(stats["counts"], {"Bueno": 1, "Nulo": 2, "Sin evaluar": 1})
+        self.assertEqual(stats["total"], 4)
+        self.assertEqual(stats["evaluated"], 3)
+        self.assertEqual(stats["success_rate"], 33.3)
+        self.assertEqual([point["rate"] for point in stats["trend"]], [100, 50, 33.3])
+        self.assertEqual(len(stats["groups"]), 3)
+        html = response.get_data(as_text=True)
+        self.assertNotIn("Acciones rapidas", html)
+        self.assertNotIn("/images/logo/logo.svg", html)
+        self.assertIn("bench-press.png", html)
+
+    def test_dashboard_statistics_filters_and_no_evaluated_results(self):
+        with self.captured() as contexts:
+            self.client.get("/dashboard?athlete_id=1&lift_type=Bench")
+        stats = contexts[-1]["statistics"]
+        self.assertEqual(stats["total"], 1)
+        self.assertEqual(stats["counts"]["Sin evaluar"], 1)
+        self.assertIsNone(stats["success_rate"])
+        self.assertEqual(stats["trend"], [])
+        self.assertEqual(stats["groups"][0]["movement"], "Bench")
+        html = self.client.get("/dashboard?athlete_id=2&lift_type=Bench").get_data(as_text=True)
+        self.assertIn("No hay resultados para los filtros seleccionados.", html)
+
+    def test_dashboard_statistics_not_limited_to_recent_attempts(self):
+        with self.db_factory() as db:
+            for _ in range(8):
+                db.add(main.Attempt(athlete_id=1, lift_type="Squat", ai_result="Bueno", image_path="", video_path=""))
+            db.commit()
+        with self.captured() as contexts:
+            self.client.get("/dashboard")
+        self.assertEqual(contexts[-1]["statistics"]["total"], 12)
+        self.assertEqual(len(contexts[-1]["attempts"]), 5)
+
     def test_combined_filters_apply_to_detail_and_summary(self):
         with self.captured() as contexts:
             response = self.client.get("/results?athlete_id=1&lift_type=Squat&result=Nulo")

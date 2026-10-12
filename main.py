@@ -1,4 +1,6 @@
 import json
+import secrets
+from contextlib import closing
 import math
 import os
 import sqlite3
@@ -7,7 +9,7 @@ import time
 import uuid
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify, redirect, render_template, request, session, send_from_directory
+from flask import abort, flash, Flask, Response, jsonify, redirect, render_template, request, session, send_from_directory
 from sqlalchemy import Column, Float, Integer, String, Text, create_engine, case, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -120,7 +122,7 @@ def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     Base.metadata.create_all(ENGINE)
     ensure_attempts_schema()
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -130,6 +132,12 @@ def init_db():
             )
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "is_active" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+        if "role" not in columns:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            conn.execute("UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users ORDER BY CASE WHEN username = 'admin' THEN 0 ELSE 1 END, id LIMIT 1)")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS lift_events (
@@ -152,18 +160,26 @@ def init_db():
                 "INSERT INTO users (username, password_hash) VALUES (?, ?)",
                 ("admin", generate_password_hash("admin123")),
             )
+            conn.execute(
+                "UPDATE users SET role = 'admin' WHERE username = 'admin'"
+            )
         conn.commit()
 
 
 def get_user(username):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         conn.row_factory = sqlite3.Row
         cur = conn.execute("SELECT * FROM users WHERE username = ?", (username,))
         return cur.fetchone()
 
 
 def require_login():
-    return session.get("user") is None
+    username = session.get("user")
+    user = get_user(username) if username else None
+    if not user or not user["is_active"]:
+        session.clear()
+        return True
+    return False
 
 
 @app.template_filter("public_reason")
@@ -178,7 +194,7 @@ def public_reason(reason):
 
 
 def ensure_attempts_schema():
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         cur = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='attempts'"
         )
@@ -516,7 +532,7 @@ def save_bench_evidence(frame_bgr, event_type, payload, output_dir="frames"):
 
 
 def save_lift_event_db(athlete_id, lift_type, event_type, image_path, result, reason, metrics, attempt_id=None):
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         conn.execute(
             """
             INSERT INTO lift_events (athlete_id, attempt_id, lift_type, event_type, image_path, result, reason, metrics_json, created_at)
@@ -669,35 +685,28 @@ def home():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    company_logo = "/static/images/evolution-machine.jpg" if os.path.isfile(
+        os.path.join(app.static_folder, "images", "evolution-machine.jpg")
+    ) else None
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         user = get_user(username)
-        if user and check_password_hash(user["password_hash"], password):
+        if user and user["is_active"] and check_password_hash(user["password_hash"], password):
+            session.clear()
             session["user"] = username
             return redirect("/dashboard")
-        return render_template("login.html", error="Credenciales invalidas.")
-    return render_template("login.html", error=None)
+        return render_template("login.html", error="Credenciales invalidas.", company_logo=company_logo)
+    return render_template("login.html", error=None, company_logo=company_logo)
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-        if not username or not password:
-            return render_template("register.html", reg_error="Completa todos los campos.")
-        if get_user(username):
-            return render_template("register.html", reg_error="El usuario ya existe.")
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, generate_password_hash(password)),
-            )
-            conn.commit()
-        session["user"] = username
-        return redirect("/dashboard")
-    return render_template("register.html", reg_error=None)
+    if require_login():
+        return redirect("/login")
+    if get_user(session["user"])["role"] != "admin":
+        abort(403)
+    return redirect("/settings")
 
 
 @app.route("/logout")
@@ -710,20 +719,46 @@ def logout():
 def dashboard():
     if require_login():
         return redirect("/login")
+    athlete_id = request.args.get("athlete_id", type=int)
+    lift_type = request.args.get("lift_type", "")
+    if lift_type not in {"Squat", "Bench", "Deadlift"}:
+        lift_type = ""
     with SessionLocal() as db:
-        attempts = (
-            db.query(Attempt, Athlete)
-            .join(Athlete, Athlete.id == Attempt.athlete_id)
-            .order_by(Attempt.id.desc())
-            .limit(5)
-            .all()
-        )
+        athletes = db.query(Athlete).order_by(Athlete.last_name, Athlete.first_name).all()
+        query = db.query(Attempt, Athlete).join(Athlete, Athlete.id == Attempt.athlete_id)
+        if athlete_id is not None:
+            query = query.filter(Attempt.athlete_id == athlete_id)
+        if lift_type:
+            query = query.filter(Attempt.lift_type == lift_type)
+        records = query.order_by(Attempt.id.asc()).all()
+    counts = {"Bueno": 0, "Nulo": 0, "Sin evaluar": 0}
+    groups = {}
+    trend = []
+    good = evaluated = 0
+    for attempt, athlete in records:
+        result = attempt.ai_result if attempt.ai_result in counts else "Sin evaluar"
+        counts[result] += 1
+        key = (athlete.id, attempt.lift_type)
+        if key not in groups:
+            groups[key] = {"athlete_id": athlete.id, "athlete": f"{athlete.first_name} {athlete.last_name}",
+                           "movement": attempt.lift_type, "Bueno": 0, "Nulo": 0, "Sin evaluar": 0}
+        groups[key][result] += 1
+        if result in {"Bueno", "Nulo"}:
+            evaluated += 1
+            good += int(result == "Bueno")
+            trend.append({"attempt": attempt.id, "rate": round(good * 100 / evaluated, 1)})
+    ordered_groups = sorted(
+        groups.values(),
+        key=lambda group: (-(group["Bueno"] + group["Nulo"] + group["Sin evaluar"]),
+                           group["athlete"].casefold(), group["athlete_id"], group["movement"]),
+    )
+    statistics = {"counts": counts, "groups": ordered_groups, "trend": trend[-30:],
+                  "total": len(records), "evaluated": evaluated,
+                  "success_rate": round(good * 100 / evaluated, 1) if evaluated else None}
     return render_template(
-        "dashboard.html",
-        username=session.get("user"),
-        active_page="dashboard",
-        page_title="Inicio",
-        attempts=attempts,
+        "dashboard.html", username=session.get("user"), active_page="dashboard", page_title="Inicio",
+        attempts=list(reversed(records[-5:])), athletes=athletes, athlete_id=athlete_id,
+        lift_type=lift_type, statistics=statistics,
     )
 
 
@@ -769,16 +804,69 @@ def results():
     )
 
 
-@app.route("/settings")
+@app.route("/settings", methods=["GET", "POST"])
 def settings():
     if require_login():
         return redirect("/login")
+    current_user = get_user(session["user"])
+    is_admin = current_user["role"] == "admin"
+    session.setdefault("users_csrf", secrets.token_hex(32))
+    error = None
+    status_code = 200
+    if request.method == "POST":
+        if not is_admin:
+            abort(403)
+        if not secrets.compare_digest(session["users_csrf"], request.form.get("csrf_token", "")):
+            abort(400)
+        action = request.form.get("action")
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        role = request.form.get("role", "user")
+        user_id = request.form.get("user_id", type=int)
+        with closing(sqlite3.connect(DB_PATH)) as conn, conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN IMMEDIATE")
+            target = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            if action not in {"create", "update", "toggle"}:
+                error = "Acción inválida."
+            elif action != "create" and not target:
+                error = "El usuario no existe."
+            elif action in {"create", "update"} and (not username or len(username) > 80 or role not in {"admin", "user"}):
+                error = "Indica un usuario de hasta 80 caracteres y un permiso válido."
+            elif action == "create" and not password:
+                error = "La contraseña es obligatoria para crear un usuario."
+            elif password and len(password) < 8:
+                error = "La contraseña debe tener al menos 8 caracteres."
+            elif target and target["id"] == current_user["id"] and (action == "toggle" or role != "admin"):
+                error = "No puedes desactivar tu propia cuenta ni quitarte el permiso de administrador."
+            if not error:
+                try:
+                    if action == "create":
+                        conn.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                                     (username, generate_password_hash(password), role))
+                    elif action == "update":
+                        conn.execute("UPDATE users SET username = ?, role = ? WHERE id = ?", (username, role, user_id))
+                        if password:
+                            conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (generate_password_hash(password), user_id))
+                    else:
+                        conn.execute("UPDATE users SET is_active = ? WHERE id = ?", (int(not target["is_active"]), user_id))
+                    conn.commit()
+                    if action == "update" and user_id == current_user["id"]:
+                        session["user"] = username
+                    flash("Usuario creado." if action == "create" else "Usuario actualizado." if action == "update" else "Estado de acceso actualizado.")
+                    return redirect("/settings")
+                except sqlite3.IntegrityError:
+                    conn.rollback()
+                    error = "El nombre de usuario ya existe."
+        status_code = 400
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        users = conn.execute("SELECT id, username, role, is_active FROM users ORDER BY id").fetchall() if is_admin else []
     return render_template(
-        "settings.html",
-        username=session.get("user"),
-        active_page="settings",
-        page_title="Configuracion",
-    )
+        "settings.html", username=session.get("user"), active_page="settings",
+        page_title="Configuración", users=users, is_admin=is_admin,
+        current_user_id=current_user["id"], error=error,
+    ), status_code
 
 
 @app.route("/athletes/new", methods=["GET", "POST"])

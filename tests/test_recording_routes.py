@@ -1,4 +1,6 @@
 import os
+import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -26,10 +28,14 @@ class RecordingRouteTests(unittest.TestCase):
                                 years_training=1))
             db.commit()
         for name, value in [("SessionLocal", self.db_factory), ("RECORDINGS", {}),
+                            ("DB_PATH", os.path.join(self.temp.name, "test.db")), ("ENGINE", engine),
                             ("ATTEMPT_UPLOAD_DIR", self.temp.name)]:
             context = patch.object(main, name, value)
             context.start()
             self.addCleanup(context.stop)
+        main.init_db()
+        with closing(sqlite3.connect(main.DB_PATH)) as conn, conn:
+            conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", ("other", "unused-test-hash"))
         self.client = main.app.test_client()
         with self.client.session_transaction() as session:
             session["user"] = "admin"

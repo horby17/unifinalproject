@@ -1,14 +1,79 @@
 {% extends "base.html" %}
-
+{% block extra_css %}
+<link href="/static/css/admin.css?v=1" rel="stylesheet" />
+{% endblock %}
 {% block content %}
-<div class="mx-auto max-w-(--breakpoint-2xl) p-4 md:p-6">
-  <div class="rounded-2xl border border-gray-200 bg-white px-5 py-7 dark:border-gray-800 dark:bg-white/[0.03]">
-    <h3 class="mb-3 text-theme-xl font-semibold text-gray-800 dark:text-white/90">
-      Configuracion
-    </h3>
-    <p class="text-sm text-gray-500 dark:text-gray-400">
-      Aqui puedes ajustar parametros de captura, usuarios y preferencias del sistema.
-    </p>
+<div class="admin-page">
+  <div class="admin-breadcrumb">Configuración <span>/</span> Usuarios</div>
+  <header class="admin-page-heading">
+    <div><h1>Usuarios</h1><p>Administra las cuentas y los permisos de acceso de tu equipo.</p></div>
+    {% if is_admin %}<button type="button" class="admin-button admin-primary" id="create-user">＋ Nuevo usuario</button>{% endif %}
+  </header>
+  {% if error %}<div role="alert" class="admin-alert admin-alert-error">{{ error }}</div>{% endif %}
+  {% for message in get_flashed_messages() %}<div role="status" class="admin-alert">{{ message }}</div>{% endfor %}
+  {% if is_admin %}
+  {% set active_count = users|selectattr('is_active')|list|length %}
+  <div class="admin-summary-grid">
+    <div class="admin-summary"><span>Total de usuarios</span><strong>{{ users|length }}</strong><small>Cuentas registradas</small></div>
+    <div class="admin-summary"><span>Usuarios activos</span><strong>{{ active_count }}</strong><small>Con acceso al sistema</small></div>
+    <div class="admin-summary"><span>Desactivados</span><strong>{{ users|length - active_count }}</strong><small>Acceso suspendido</small></div>
+    <div class="admin-summary"><span>Administradores</span><strong>{{ users|selectattr('role', 'equalto', 'admin')|list|length }}</strong><small>Gestión de usuarios</small></div>
   </div>
+  <section class="admin-panel" aria-label="Usuarios del sistema">
+    <div class="admin-table-toolbar">
+      <div class="admin-tabs" role="group" aria-label="Filtrar por estado">
+        <button type="button" data-status="all" aria-pressed="true">Todos <span>{{ users|length }}</span></button>
+        <button type="button" data-status="active" aria-pressed="false">Activos <span>{{ active_count }}</span></button>
+        <button type="button" data-status="inactive" aria-pressed="false">Desactivados <span>{{ users|length - active_count }}</span></button>
+      </div>
+      <label class="admin-search"><span aria-hidden="true">⌕</span><input id="user-search" type="search" placeholder="Buscar usuario…" aria-label="Buscar usuario" /></label>
+    </div>
+    <div class="admin-table-scroll">
+      <table class="admin-table">
+        <thead><tr><th>Usuario</th><th>ID</th><th>Permisos</th><th>Estado</th><th class="admin-actions-heading">Acciones</th></tr></thead>
+        <tbody id="users-table-body">
+          {% for user in users %}
+          <tr data-user-row data-name="{{ user.username }}" data-state="{{ 'active' if user.is_active else 'inactive' }}">
+            <td><div class="admin-user-cell"><span class="admin-avatar" aria-hidden="true">{{ user.username[:2]|upper }}</span><div><strong>{{ user.username }}</strong><small>{{ 'Tu cuenta' if user.id == current_user_id else 'Cuenta del sistema' }}</small></div></div></td>
+            <td class="admin-muted">#{{ user.id }}</td>
+            <td><span class="admin-role">{{ 'Administrador' if user.role == 'admin' else 'Usuario' }}</span></td>
+            <td><span class="admin-status {{ 'is-active' if user.is_active else 'is-inactive' }}"><i></i>{{ 'Activo' if user.is_active else 'Desactivado' }}</span></td>
+            <td><div class="admin-row-actions">
+              <button type="button" class="admin-button" data-edit-user="{{ user.id }}" data-username="{{ user.username }}" data-role="{{ user.role }}" aria-label="Editar {{ user.username }}">Editar</button>
+              {% if user.id != current_user_id %}
+              <form method="post" action="/settings" onsubmit="return confirm('¿Deseas {{ 'desactivar' if user.is_active else 'reactivar' }} este usuario?')">
+                <input type="hidden" name="csrf_token" value="{{ session.users_csrf }}"><input type="hidden" name="action" value="toggle"><input type="hidden" name="user_id" value="{{ user.id }}">
+                <button class="admin-button {{ 'admin-danger' if user.is_active else 'admin-activate' }}">{{ 'Desactivar' if user.is_active else 'Reactivar' }}</button>
+              </form>
+              {% endif %}
+            </div></td>
+          </tr>
+          {% endfor %}
+          <tr id="users-empty" hidden><td colspan="5" class="admin-empty">No se encontraron usuarios con estos filtros.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <footer class="admin-table-footer"><span id="user-count" role="status" aria-live="polite">{{ users|length }} usuarios</span><div class="admin-pagination"><button type="button" class="admin-button" id="users-prev">Anterior</button><span id="users-page">Página 1</span><button type="button" class="admin-button" id="users-next">Siguiente</button></div></footer>
+  </section>
+  <p class="admin-footnote">Las cuentas desactivadas no pueden ingresar al sistema. Puedes reactivarlas cuando lo necesites.</p>
+  <dialog id="user-dialog" class="admin-dialog" {% if error and request.form.get('action') in ['create', 'update'] %}data-reopen="true"{% endif %}>
+    <form method="post" action="/settings" id="user-form">
+      <header class="admin-dialog-header"><div><h2 id="user-dialog-title">Crear usuario</h2><p>Configura la cuenta y sus permisos de acceso.</p></div><button type="button" class="admin-close" data-close-dialog aria-label="Cerrar">×</button></header>
+      <input type="hidden" name="csrf_token" value="{{ session.users_csrf }}">
+      <input type="hidden" name="action" id="user-action" value="{{ request.form.get('action', 'create') if error else 'create' }}">
+      <input type="hidden" name="user_id" id="user-id" value="{{ request.form.get('user_id', '') if error else '' }}">
+      <div class="admin-dialog-body">
+        {% if error %}<div class="admin-alert admin-alert-error">{{ error }}</div>{% endif %}
+        <label for="user-name">Usuario</label><input id="user-name" name="username" required maxlength="80" autocomplete="off" value="{{ request.form.get('username', '') if error else '' }}">
+        <label for="user-password" id="user-password-label">Contraseña</label><input id="user-password" type="password" name="password" minlength="8" autocomplete="new-password">
+        <p class="admin-field-help" id="user-password-help">Usa al menos 8 caracteres.</p>
+        <label for="user-role">Permisos</label><select id="user-role" name="role"><option value="user" {% if error and request.form.get('role') == 'user' %}selected{% endif %}>Usuario</option><option value="admin" {% if error and request.form.get('role') == 'admin' %}selected{% endif %}>Administrador</option></select>
+        <p class="admin-field-help">Los administradores también pueden gestionar las cuentas del sistema.</p>
+      </div>
+      <footer class="admin-dialog-footer"><button type="button" class="admin-button" data-close-dialog>Cancelar</button><button class="admin-button admin-primary" id="user-save">Crear usuario</button></footer>
+    </form>
+  </dialog>
+  {% else %}<section class="admin-panel admin-empty">Solo los administradores pueden gestionar los usuarios. Contacta al administrador para solicitar cambios en tu cuenta.</section>{% endif %}
 </div>
 {% endblock %}
+{% block extra_js %}<script src="/static/js/users.js?v=1" defer></script>{% endblock %}
